@@ -1,12 +1,12 @@
 /**
- * TimeSlider Component - Monthly 2025 Timeline
- * Ultra sleek slider for Jan-Dec 2025 with auto-play
+ * TimeSlider Component - 2018-2024 Timeline
+ * Ultra sleek slider for 7-year span with auto-play
  */
 
 import React, { useRef, useEffect, useState, useCallback } from 'react';
 import { motion } from 'framer-motion';
 
-const TimeSlider = ({ activeMonth, onMonthChange, minMonth = 1, maxMonth = 12, year = 2025 }) => {
+const TimeSlider = ({ activeMonth, onMonthChange, minMonth = 1, maxMonth = 84, startYear = 2018, endYear = 2024 }) => {
   const sliderRef = useRef(null);
   const [isDragging, setIsDragging] = useState(false);
   const [isPlaying, setIsPlaying] = useState(false);
@@ -16,7 +16,10 @@ const TimeSlider = ({ activeMonth, onMonthChange, minMonth = 1, maxMonth = 12, y
   const playValue = useRef(activeMonth);
   const activeMonthRef = useRef(activeMonth);
 
-  const monthNames = ['JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN', 'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC'];
+  const years = [];
+  for (let y = startYear; y <= endYear; y++) {
+    years.push(y);
+  }
 
   useEffect(() => {
     activeMonthRef.current = activeMonth;
@@ -133,7 +136,14 @@ const TimeSlider = ({ activeMonth, onMonthChange, minMonth = 1, maxMonth = 12, y
   // Calculate position percentage
   const percentage = ((activeMonth - minMonth) / (maxMonth - minMonth)) * 100;
 
-  const displayMonth = Math.max(minMonth, Math.min(maxMonth, Math.round(activeMonth)));
+  // Convert month index to year and month
+  const getCurrentYearMonth = (monthIdx) => {
+    const year = startYear + Math.floor((monthIdx - 1) / 12);
+    const month = ((monthIdx - 1) % 12) + 1;
+    return { year, month };
+  };
+
+  const { year: displayYear, month: displayMonth } = getCurrentYearMonth(Math.round(activeMonth));
 
   const togglePlay = () => {
     setIsPlaying((prev) => !prev);
@@ -169,61 +179,45 @@ const TimeSlider = ({ activeMonth, onMonthChange, minMonth = 1, maxMonth = 12, y
               className="relative h-1 bg-white/10 rounded-full cursor-pointer overflow-hidden backdrop-blur-sm flex-1"
               onMouseDown={handleMouseDown}
             >
-            {/* Progress Fill */}
-            <motion.div
-              className="absolute h-full rounded-full bg-gradient-to-r from-cyan-400 to-cyan-300"
-              style={{ width: `${percentage}%` }}
-              initial={{ width: 0 }}
-              animate={{ width: `${percentage}%` }}
-              transition={{ duration: 0.25, ease: 'easeOut' }}
-            />
-
-            {/* Indicator Dot */}
-            <motion.div
-              className="absolute top-1/2 transform -translate-y-1/2 -translate-x-1/2 pointer-events-none"
-              style={{ left: `${percentage}%` }}
-              animate={{ 
-                scale: isDragging ? 1.5 : 1,
-              }}
-              transition={{ duration: 0.15 }}
-            >
-              <div 
-                className="w-3 h-3 rounded-full bg-cyan-400 shadow-lg"
-                style={{
-                  boxShadow: '0 0 20px rgba(34, 211, 238, 0.8)'
-                }}
+              {/* Progress Fill */}
+              <motion.div
+                className="absolute h-full rounded-full bg-gradient-to-r from-cyan-400 to-cyan-300"
+                style={{ width: `${percentage}%` }}
+                initial={{ width: 0 }}
+                animate={{ width: `${percentage}%` }}
+                transition={{ duration: 0.25, ease: 'easeOut' }}
               />
-            </motion.div>
+
             </div>
           </div>
 
-          {/* Month Marks (aligned under bar) */}
+          {/* Year Marks (aligned under bar) */}
           <div className="flex items-start gap-3 mt-3">
             <div className="h-7 w-7" />
-            <div className="relative h-6 flex-1">
-              {monthNames.map((month, index) => {
-                const monthNum = index + 1;
-                const monthPercentage = ((monthNum - minMonth) / (maxMonth - minMonth)) * 100;
-                const isActive = monthNum === displayMonth;
+            <div className="relative h-8 flex-1">
+              {years.map((year) => {
+                const yearStartMonth = (year - startYear) * 12 + 1;
+                const yearPercentage = ((yearStartMonth - minMonth) / (maxMonth - minMonth)) * 100;
+                const isActive = year === displayYear;
 
                 return (
                   <div
-                    key={monthNum}
+                    key={year}
                     className="absolute transform -translate-x-1/2"
-                    style={{ left: `${monthPercentage}%` }}
+                    style={{ left: `${yearPercentage}%` }}
                   >
                     {/* Tick Mark */}
-                    <div className={`h-2 w-px mx-auto ${
-                      isActive ? 'bg-cyan-400' : 'bg-white/20'
+                    <div className={`h-3 w-px mx-auto ${
+                      isActive ? 'bg-cyan-400' : 'bg-white/30'
                     }`} />
 
-                    {/* Month Label */}
-                    <div className={`text-center mt-1 text-xs font-light tracking-wide transition-all ${
+                    {/* Year Label */}
+                    <div className={`text-center mt-1.5 text-sm font-light tracking-wider transition-all ${
                       isActive
-                        ? 'text-cyan-400 font-medium'
-                        : 'text-white/40'
+                        ? 'text-cyan-400 font-semibold'
+                        : 'text-white/50'
                     }`}>
-                      {month}
+                      {year}
                     </div>
                   </div>
                 );
