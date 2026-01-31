@@ -13,3 +13,4 @@ growth_test.txt
 *.md
 yearsold.csv
 outputs/
+*csv
