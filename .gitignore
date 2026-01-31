@@ -11,4 +11,5 @@ growth_test.txt
 .env
 
 *.md
-
+yearsold.csv
+sales_2025_monthly.csv
