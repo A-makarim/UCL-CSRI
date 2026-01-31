@@ -6,14 +6,11 @@
 import React, { useState, useEffect } from 'react';
 import MapEngine from './components/MapEngine';
 import TimeSlider from './components/TimeSlider';
-import LoadingScreen from './components/LoadingScreen';
 
 function App() {
-  const [loading, setLoading] = useState(true);
-  const [loadingProgress, setLoadingProgress] = useState(0);
-  const [loadingMessage, setLoadingMessage] = useState('Loading...');
+  const [loading, setLoading] = useState(false);
   
-  const [activeMonth, setActiveMonth] = useState(1); // continuous in [1..12]
+  const [activeMonth, setActiveMonth] = useState(1); // continuous in [1..84] for 2018-2024
   const [baseMonthInt, setBaseMonthInt] = useState(1);
   const [monthBlend, setMonthBlend] = useState(0); // 0..1 between baseMonthInt and next
   const [salesData2025, setSalesData2025] = useState(null);
@@ -21,21 +18,31 @@ function App() {
   const [areaStats, setAreaStats] = useState(null);
 
   const [monthSamples, setMonthSamples] = useState(null);
+  const [mapInstance, setMapInstance] = useState(null);
 
-  // Load 2025 sales data
+  const [hasSearched, setHasSearched] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [isSearching, setIsSearching] = useState(false);
+  const [searchError, setSearchError] = useState('');
+  const [targetLocation, setTargetLocation] = useState(null);
+  const [isFocused, setIsFocused] = useState(false);
+  const [barReady, setBarReady] = useState(false);
+  const [showBarText, setShowBarText] = useState(false);
+  const [isCollapsing, setIsCollapsing] = useState(false);
+
+  // Load 2018-2024 sales data
   useEffect(() => {
+    if (!hasSearched) return;
     const loadData = async () => {
       try {
-        setLoadingMessage('Loading 2025 property sales data...');
-        setLoadingProgress(30);
+        setLoading(true);
 
-        const response = await fetch('/outputs/sales_2025_monthly.json');
+        const response = await fetch('/outputs/sales_2018_2024_monthly.json');
         const data = await response.json();
         
-        console.log('📦 Loaded 2025 Sales:', data.meta.totalSales.toLocaleString(), 'properties');
+        console.log('📦 Loaded Multi-Year Sales:', data.meta.totalSamples.toLocaleString(), 'samples');
         
         setSalesData2025(data);
-        setLoadingProgress(70);
 
         // Pre-sample a fixed number of points per month for smooth playback
         const SAMPLE_PER_MONTH = 4000;
@@ -64,8 +71,8 @@ function App() {
             }
           }));
 
-        const janKey = '2025-01';
-        const febKey = '2025-02';
+        const janKey = '2018-01';
+        const febKey = '2018-02';
         setBaseMonthInt(1);
         setMonthBlend(0);
         const geoJSON = {
@@ -76,7 +83,7 @@ function App() {
           ]
         };
         
-        console.log('🗺️ January 2025 (blend-ready):', (data.months[janKey]?.length || 0).toLocaleString(), 'sales');
+        console.log('🗺️ January 2018 (blend-ready):', (data.months[janKey]?.length || 0).toLocaleString(), 'sales');
         console.log('   Visualizing:', geoJSON.features.length.toLocaleString(), 'properties');
         
         setGeoData(geoJSON);
@@ -89,26 +96,31 @@ function App() {
           avgValue: Math.round(prices.reduce((a, b) => a + b, 0) / prices.length)
         });
 
-        setLoadingProgress(100);
         setLoading(false);
         
-        console.log('✨ Ready! Slide through Jan-Dec 2025');
+        console.log('✨ Ready! Slide through 2018-2024 (84 months)');
       } catch (error) {
         console.error('❌ Error loading data:', error);
-        setLoadingMessage('Error loading data');
-        setTimeout(() => setLoading(false), 2000);
+        setLoading(false);
       }
     };
 
     loadData();
-  }, []);
+  }, [hasSearched]);
 
   const rebuildGeoForBaseMonth = (baseMonth) => {
     if (!monthSamples || !salesData2025) return;
 
-    const nextMonth = baseMonth === 12 ? 1 : baseMonth + 1;
-    const baseKey = `2025-${String(baseMonth).padStart(2, '0')}`;
-    const nextKey = `2025-${String(nextMonth).padStart(2, '0')}`;
+    // Convert month index (1-84) to year-month key
+    const getMonthKey = (monthIdx) => {
+      const year = 2018 + Math.floor((monthIdx - 1) / 12);
+      const month = ((monthIdx - 1) % 12) + 1;
+      return `${year}-${String(month).padStart(2, '0')}`;
+    };
+
+    const nextMonth = baseMonth === 84 ? 1 : baseMonth + 1;
+    const baseKey = getMonthKey(baseMonth);
+    const nextKey = getMonthKey(nextMonth);
     const baseSales = monthSamples[baseKey] || [];
     const nextSales = monthSamples[nextKey] || [];
 
@@ -147,14 +159,14 @@ function App() {
     }
   };
 
-  // Handle timeline changes (continuous in [1..12])
+  // Handle timeline changes (continuous in [1..84] for 2018-2024)
   const handleMonthChange = (monthValue) => {
     if (!salesData2025 || !monthSamples) return;
 
-    const clamped = Math.max(1, Math.min(12, monthValue));
+    const clamped = Math.max(1, Math.min(84, monthValue));
     setActiveMonth(clamped);
 
-    const baseMonth = Math.max(1, Math.min(12, Math.floor(clamped)));
+    const baseMonth = Math.max(1, Math.min(84, Math.floor(clamped)));
     const t = clamped - baseMonth;
 
     setMonthBlend(Math.max(0, Math.min(1, t)));
@@ -165,28 +177,156 @@ function App() {
     }
   };
 
-  if (loading) {
-    return <LoadingScreen progress={loadingProgress} message={loadingMessage} />;
+  useEffect(() => {
+    if (!mapInstance || !targetLocation) return;
+
+    const { center, bbox } = targetLocation;
+
+    mapInstance.stop();
+    mapInstance.jumpTo({
+      center: [0, 20],
+      zoom: 0.8,
+      bearing: 0,
+      pitch: 0
+    });
+
+    const timeout = setTimeout(() => {
+      mapInstance.setPitch(0);
+      if (bbox && bbox.length === 4) {
+        mapInstance.fitBounds(
+          [
+            [bbox[0], bbox[1]],
+            [bbox[2], bbox[3]]
+          ],
+          { padding: 60, duration: 2400, easing: (t) => t * (2 - t) }
+        );
+      } else {
+        mapInstance.flyTo({ center, zoom: 6, duration: 2400, easing: (t) => t * (2 - t) });
+      }
+    }, 1800);
+
+    return () => clearTimeout(timeout);
+  }, [mapInstance, targetLocation]);
+
+  const handleSearchSubmit = async (event) => {
+    event.preventDefault();
+    const query = searchQuery.trim();
+    if (!query) return;
+
+    setIsSearching(true);
+    setSearchError('');
+    setIsCollapsing(true);
+
+    try {
+      const token = import.meta.env.VITE_MAPBOX_TOKEN;
+      const url = `https://api.mapbox.com/geocoding/v5/mapbox.places/${encodeURIComponent(query)}.json?access_token=${token}&limit=1`;
+      const response = await fetch(url);
+      const data = await response.json();
+
+      if (!data?.features?.length) {
+        setSearchError('No results found. Try a different place.');
+        setIsSearching(false);
+        return;
+      }
+
+      const feature = data.features[0];
+      setTimeout(() => {
+        setTargetLocation({ center: feature.center, bbox: feature.bbox || null });
+        setHasSearched(true);
+      }, 800);
+    } catch (error) {
+      console.error('Search error:', error);
+      setSearchError('Search failed. Check your connection.');
+    } finally {
+      setIsSearching(false);
+    }
+  };
+
+  useEffect(() => {
+    if (hasSearched) return;
+    const openTimer = setTimeout(() => setBarReady(true), 300);
+    const textTimer = setTimeout(() => setShowBarText(true), 900);
+    return () => {
+      clearTimeout(openTimer);
+      clearTimeout(textTimer);
+    };
+  }, [hasSearched]);
+
+  if (!hasSearched) {
+    return (
+      <div className="relative w-full h-screen bg-black overflow-hidden flex items-center justify-center">
+        <form
+          onSubmit={handleSearchSubmit}
+          className="w-full max-w-xl px-6"
+        >
+          <div
+            className={`mx-auto flex items-center gap-3 rounded-full border border-white/10 bg-white/5 px-5 py-2 shadow-2xl backdrop-blur-md transition-all duration-700 origin-center ${
+              isCollapsing
+                ? 'scale-x-0 opacity-0'
+                : isFocused
+                  ? 'w-full'
+                  : barReady
+                    ? 'w-3/4'
+                    : 'w-1/3'
+            }`}
+          >
+            <span className={`text-white/60 text-sm transition-opacity duration-500 ${showBarText ? 'opacity-100' : 'opacity-0'}`}>
+              Search
+            </span>
+            <input
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              onFocus={() => setIsFocused(true)}
+              onBlur={() => setIsFocused(false)}
+              placeholder="Enter a city, postcode, or country"
+              className={`flex-1 bg-transparent text-white placeholder-white/30 outline-none transition-opacity duration-500 ${showBarText ? 'opacity-100' : 'opacity-0'}`}
+            />
+            <button
+              type="submit"
+              disabled={isSearching}
+              className={`rounded-full bg-white/10 px-4 py-1.5 text-sm text-white hover:bg-white/20 transition disabled:opacity-50 transition-opacity duration-500 ${showBarText ? 'opacity-100' : 'opacity-0'}`}
+            >
+              {isSearching ? 'Searching…' : 'Go'}
+            </button>
+          </div>
+          {searchError && (
+            <div className="mt-3 text-center text-sm text-red-300">
+              {searchError}
+            </div>
+          )}
+        </form>
+      </div>
+    );
   }
 
   return (
     <div className="relative w-full h-screen bg-black overflow-hidden">
-      {/* 3D Globe - Full Screen */}
       <MapEngine
         geoData={geoData}
         selectedVariable="price"
         activeMonth={activeMonth}
         blend={monthBlend}
+        onMapLoad={setMapInstance}
       />
-      
-      {/* Monthly Time Slider */}
-      <TimeSlider
-        activeMonth={activeMonth}
-        onMonthChange={handleMonthChange}
-        minMonth={1}
-        maxMonth={12}
-        year={2025}
-      />
+      <div
+        className={`absolute bottom-0 left-0 right-0 transition-all duration-700 ease-out ${
+          hasSearched ? 'translate-y-0 opacity-100' : 'translate-y-full opacity-0'
+        }`}
+      >
+        <TimeSlider
+          activeMonth={activeMonth}
+          onMonthChange={handleMonthChange}
+          minMonth={1}
+          maxMonth={84}
+          startYear={2018}
+          endYear={2024}
+        />
+      </div>
+      {loading && (
+        <div className="absolute top-4 left-4 text-xs text-white/50">
+          Loading data…
+        </div>
+      )}
     </div>
   );
 }
