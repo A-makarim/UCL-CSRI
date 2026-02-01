@@ -27,7 +27,8 @@ const MapEngine = ({
   polygonStatsMonth,
   polygonPointsData,
   onAIClick,
-  propertyMode = 'predicted'
+  propertyMode = 'predicted',
+  currentTimelineDate = null
 }) => {
   const mapContainer = useRef(null);
   const map = useRef(null);
@@ -190,8 +191,8 @@ const MapEngine = ({
           : props.value
             ? Number(props.value).toLocaleString('en-GB', { style: 'currency', currency: 'GBP' })
             : 'n/a';
-        // Use timeline date if available, otherwise fall back to property date
-        const date = props.timelineDate || props.date || 'n/a';
+        // Use current timeline position, not the property's original date
+        const date = currentTimelineDate || props.timelineDate || props.date || 'n/a';
         const postcode = props.postcode || 'n/a';
         const district = props.district || 'n/a';
         const propType = props.propType || 'Property';

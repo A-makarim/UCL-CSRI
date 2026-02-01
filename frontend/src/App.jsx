@@ -60,6 +60,13 @@ function App() {
     return JSON.parse(raw);
   };
 
+  // Calculate current timeline date from activeMonth value
+  const getCurrentTimelineDate = () => {
+    const year = START_YEAR + Math.floor((activeMonth - 1) / 12);
+    const month = Math.floor(((activeMonth - 1) % 12)) + 1;
+    return `${year}-${String(month).padStart(2, '0')}`;
+  };
+
   const [hasSearched, setHasSearched] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [isSearching, setIsSearching] = useState(false);
@@ -91,7 +98,7 @@ function App() {
         });
         setMonthSamples(samples);
 
-        const buildFeatures = (sales, group) =>
+        const buildFeatures = (sales, group, timelineDate) =>
           sales.map((sale) => ({
             type: 'Feature',
             geometry: {
@@ -106,7 +113,8 @@ function App() {
               address: sale.address,
               district: sale.district,
               propType: sale.propType,
-              date: sale.date
+              date: sale.date,
+              timelineDate: timelineDate || sale.date
             }
           }));
 
@@ -748,6 +756,7 @@ function App() {
         polygonStats={polygonStats}
         polygonStatsMonth={polygonStatsMonth}
         polygonPointsData={polygonPointsData}
+        currentTimelineDate={getCurrentTimelineDate()}
         onAIClick={(areaInfo) => {
           setSelectedAreaInfo(areaInfo);
           setAiChatOpen(true);
