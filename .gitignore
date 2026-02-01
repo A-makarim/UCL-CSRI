@@ -23,6 +23,8 @@ gb-postcodes-v5.tar.bz2
 yearsold.csv
 outputs/
 *.csv
+data/
+PPD/
 *.zip
 *.7z
 *.tar
