@@ -6,7 +6,7 @@
 
 import React, { useEffect, useRef, useState } from 'react';
 import mapboxgl from 'mapbox-gl';
-import { askAgent, fetchTransactions } from '../services/localData';
+import { fetchTransactions } from '../services/localData';
 
 mapboxgl.accessToken = import.meta.env.VITE_MAPBOX_TOKEN;
 
@@ -79,7 +79,8 @@ const MapEngine = ({
   showDots,
   showHeatmap,
   onMapLoad,
-  onUpdateStateChange
+  onUpdateStateChange,
+  onRequestAgentSummary
 }) => {
   const mapContainer = useRef(null);
   const map = useRef(null);
@@ -90,6 +91,7 @@ const MapEngine = ({
   const polygonKeyRef = useRef(null);
   const activeMonthRef = useRef(activeMonth);
   const polygonModeRef = useRef(polygonIdKey);
+  const agentRequestRef = useRef(onRequestAgentSummary);
   const clickSeqRef = useRef(0);
   const [mapLoaded, setMapLoaded] = useState(false);
 
@@ -100,6 +102,10 @@ const MapEngine = ({
   useEffect(() => {
     polygonModeRef.current = polygonIdKey;
   }, [polygonIdKey]);
+
+  useEffect(() => {
+    agentRequestRef.current = onRequestAgentSummary;
+  }, [onRequestAgentSummary]);
 
   useEffect(() => {
     if (map.current) return;
@@ -401,19 +407,6 @@ const MapEngine = ({
         `;
       };
 
-      const buildAgentHtml = (content, { loading, error } = {}) => {
-        const body = loading
-          ? 'Generating summary…'
-          : error
-            ? 'Failed to load AI summary.'
-            : escapeHtml(content || 'No summary available.');
-        return `
-          <div class="popup-ai">
-            <div class="popup-ai-title">AI Summary</div>
-            <div class="popup-ai-body">${body}</div>
-          </div>
-        `;
-      };
 
       const handlePointHover = (event) => {
         const feature = event.features?.[0];
@@ -494,6 +487,18 @@ const MapEngine = ({
             `${summaryHtml}<div class="popup-empty">Failed to load transactions.</div>`
           );
         }
+
+        if (agentRequestRef.current && month) {
+          agentRequestRef.current({
+            title: postcode || 'Postcode',
+            mode: 'postcode',
+            code: postcode,
+            month,
+            median_price: Number(median_price),
+            mean_price: Number(mean_price),
+            sales: Number(sales)
+          });
+        }
       };
 
       const handlePolygonClick = async (event) => {
@@ -510,11 +515,10 @@ const MapEngine = ({
         const summaryHtml = buildSummaryHtml(header, median, meanPrice, sales);
         const seq = ++clickSeqRef.current;
         let transactionsHtml = '<div class="popup-loading">Loading transactions…</div>';
-        let agentHtml = buildAgentHtml('', { loading: true });
 
         clickPopupRef.current
           .setLngLat(event.lngLat)
-          .setHTML(`${summaryHtml}${transactionsHtml}${agentHtml}`)
+          .setHTML(`${summaryHtml}${transactionsHtml}`)
           .addTo(mapInstance);
 
         const mode = polygonModeRef.current;
@@ -534,33 +538,23 @@ const MapEngine = ({
           });
           if (seq !== clickSeqRef.current) return;
           transactionsHtml = buildTransactionsHtml(details, { totalOverride: sales });
-          clickPopupRef.current.setHTML(`${summaryHtml}${transactionsHtml}${agentHtml}`);
+          clickPopupRef.current.setHTML(`${summaryHtml}${transactionsHtml}`);
         } catch (error) {
           if (seq !== clickSeqRef.current) return;
           transactionsHtml = '<div class="popup-empty">Failed to load transactions.</div>';
-          clickPopupRef.current.setHTML(`${summaryHtml}${transactionsHtml}${agentHtml}`);
+          clickPopupRef.current.setHTML(`${summaryHtml}${transactionsHtml}`);
         }
 
-        try {
-          const aiResponse = await askAgent({
-            message: `Give a concise summary about ${label} in ${month}. Highlight what the median price, mean price, and sales suggest.`,
-            history: [],
-            context: {
-              code: String(feature.id),
-              mode,
-              month,
-              median_price: median,
-              mean_price: meanPrice,
-              sales
-            }
+        if (agentRequestRef.current && month) {
+          agentRequestRef.current({
+            title: label,
+            mode,
+            code: String(feature.id),
+            month,
+            median_price: median,
+            mean_price: meanPrice,
+            sales
           });
-          if (seq !== clickSeqRef.current) return;
-          agentHtml = buildAgentHtml(aiResponse?.answer || '');
-          clickPopupRef.current.setHTML(`${summaryHtml}${transactionsHtml}${agentHtml}`);
-        } catch (error) {
-          if (seq !== clickSeqRef.current) return;
-          agentHtml = buildAgentHtml('', { error: true });
-          clickPopupRef.current.setHTML(`${summaryHtml}${transactionsHtml}${agentHtml}`);
         }
       };
 
