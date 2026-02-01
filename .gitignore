@@ -2,6 +2,7 @@ node_modules/
 frontend/node_modules/
 frontend/dist/
 dist/
+hackathon_env/
 
 .env
 .env.*
@@ -36,3 +37,5 @@ PPD/
 subbb/
 vendor/
 codepo_gb.zip
+
+notebooks\sale_history_data.json
