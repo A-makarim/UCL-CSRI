@@ -120,7 +120,8 @@ Context: ${areaInfo.median ? `Current median price: £${areaInfo.median?.toLocal
     setIsLoading(true);
 
     try {
-      const response = await fetch('http://localhost:3002/api/ask-ai', {
+      const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:3002';
+      const response = await fetch(`${apiUrl}/api/ask-ai`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -190,7 +191,8 @@ Context: ${areaInfo.median ? `Current median price: £${areaInfo.median?.toLocal
 
         try {
           // Call backend scraper
-          const response = await fetch('http://localhost:3002/api/scrape-images', {
+          const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:3002';
+          const response = await fetch(`${apiUrl}/api/scrape-images`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ url: currentListingUrl })

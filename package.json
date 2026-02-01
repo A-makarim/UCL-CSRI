@@ -1,0 +1,17 @@
+{
+  "name": "ucl-csri",
+  "version": "1.0.0",
+  "description": "UK Property Market Analysis Platform",
+  "scripts": {
+    "dev": "concurrently \"cd frontend && npm run dev\" \"node server.cjs\"",
+    "build": "cd frontend && npm install && npm run build",
+    "vercel-build": "cd frontend && npm run build"
+  },
+  "dependencies": {
+    "cheerio": "^1.0.0-rc.12",
+    "node-fetch": "^2.7.0"
+  },
+  "devDependencies": {
+    "concurrently": "^8.2.2"
+  }
+}
