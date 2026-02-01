@@ -58,9 +58,6 @@ const MapEngine = ({
   const listenersAttachedRef = useRef(false);
   const polygonKeyRef = useRef(null);
   const [mapLoaded, setMapLoaded] = useState(false);
-  const prevStatsRef = useRef(null);
-  const blendRef = useRef(1);
-  const blendRafRef = useRef(null);
 
   useEffect(() => {
     if (map.current) return;
@@ -106,10 +103,8 @@ const MapEngine = ({
     if (!map.current || !mapLoadedRef.current) return;
 
     const mapInstance = map.current;
-    const polygonPrevSourceId = 'polygon-source-prev';
-    const polygonNextSourceId = 'polygon-source-next';
-    const polygonFillPrevId = 'polygon-fill-prev';
-    const polygonFillNextId = 'polygon-fill-next';
+    const polygonSourceId = 'polygon-source';
+    const polygonFillId = 'polygon-fill';
     const polygonOutlineId = 'polygon-outline';
     const pointSourceId = 'point-source';
     const heatmapLayerId = 'point-heatmap';
@@ -118,7 +113,7 @@ const MapEngine = ({
     const range = polygonRange || { min: 0, max: 1 };
     const pointRange = getPointRange(pointData);
 
-    const polygonOpacity = showHeatmap ? 0.6 : 0.78;
+    const polygonOpacity = 1;
     const buildPolygonColor = [
       'case',
       ['==', ['feature-state', 'sales'], null],
@@ -149,72 +144,43 @@ const MapEngine = ({
     ];
 
     const needsPolygonSourceReset =
-      !mapInstance.getSource(polygonPrevSourceId) ||
-      !mapInstance.getSource(polygonNextSourceId) ||
-      polygonKeyRef.current !== polygonIdKey;
+      !mapInstance.getSource(polygonSourceId) || polygonKeyRef.current !== polygonIdKey;
 
     if (needsPolygonSourceReset) {
-      if (mapInstance.getLayer(polygonFillPrevId)) mapInstance.removeLayer(polygonFillPrevId);
-      if (mapInstance.getLayer(polygonFillNextId)) mapInstance.removeLayer(polygonFillNextId);
+      if (mapInstance.getLayer(polygonFillId)) mapInstance.removeLayer(polygonFillId);
       if (mapInstance.getLayer(polygonOutlineId)) mapInstance.removeLayer(polygonOutlineId);
-      if (mapInstance.getSource(polygonPrevSourceId)) mapInstance.removeSource(polygonPrevSourceId);
-      if (mapInstance.getSource(polygonNextSourceId)) mapInstance.removeSource(polygonNextSourceId);
+      if (mapInstance.getSource(polygonSourceId)) mapInstance.removeSource(polygonSourceId);
 
-      mapInstance.addSource(polygonPrevSourceId, {
-        type: 'geojson',
-        data: polygonData || EMPTY_GEOJSON,
-        promoteId: polygonIdKey || undefined
-      });
-      mapInstance.addSource(polygonNextSourceId, {
+      mapInstance.addSource(polygonSourceId, {
         type: 'geojson',
         data: polygonData || EMPTY_GEOJSON,
         promoteId: polygonIdKey || undefined
       });
       polygonKeyRef.current = polygonIdKey;
-      prevStatsRef.current = null;
     } else {
-      mapInstance.getSource(polygonPrevSourceId).setData(polygonData || EMPTY_GEOJSON);
-      mapInstance.getSource(polygonNextSourceId).setData(polygonData || EMPTY_GEOJSON);
+      mapInstance.getSource(polygonSourceId).setData(polygonData || EMPTY_GEOJSON);
     }
 
-    const prevOpacity = polygonOpacity * (1 - blendRef.current);
-    const nextOpacity = polygonOpacity * blendRef.current;
-
-    if (!mapInstance.getLayer(polygonFillPrevId)) {
+    if (!mapInstance.getLayer(polygonFillId)) {
       mapInstance.addLayer({
-        id: polygonFillPrevId,
+        id: polygonFillId,
         type: 'fill',
-        source: polygonPrevSourceId,
+        source: polygonSourceId,
         paint: {
           'fill-color': buildPolygonColor,
-          'fill-opacity': prevOpacity
+          'fill-opacity': polygonOpacity
         }
       });
     } else {
-      mapInstance.setPaintProperty(polygonFillPrevId, 'fill-color', buildPolygonColor);
-      mapInstance.setPaintProperty(polygonFillPrevId, 'fill-opacity', prevOpacity);
-    }
-
-    if (!mapInstance.getLayer(polygonFillNextId)) {
-      mapInstance.addLayer({
-        id: polygonFillNextId,
-        type: 'fill',
-        source: polygonNextSourceId,
-        paint: {
-          'fill-color': buildPolygonColor,
-          'fill-opacity': nextOpacity
-        }
-      });
-    } else {
-      mapInstance.setPaintProperty(polygonFillNextId, 'fill-color', buildPolygonColor);
-      mapInstance.setPaintProperty(polygonFillNextId, 'fill-opacity', nextOpacity);
+      mapInstance.setPaintProperty(polygonFillId, 'fill-color', buildPolygonColor);
+      mapInstance.setPaintProperty(polygonFillId, 'fill-opacity', polygonOpacity);
     }
 
     if (!mapInstance.getLayer(polygonOutlineId)) {
       mapInstance.addLayer({
         id: polygonOutlineId,
         type: 'line',
-        source: polygonNextSourceId,
+        source: polygonSourceId,
         paint: {
           'line-color': 'rgba(255,255,255,0.25)',
           'line-width': 0.6
@@ -224,28 +190,11 @@ const MapEngine = ({
 
     if (polygonStats) {
       const entries = Object.entries(polygonStats);
-      const previous = prevStatsRef.current || polygonStats;
-      const hadPrevious = prevStatsRef.current != null;
-
-      if (blendRafRef.current) {
-        cancelAnimationFrame(blendRafRef.current);
-        blendRafRef.current = null;
-      }
-
       if (onUpdateStateChange) onUpdateStateChange(true);
 
       entries.forEach(([code, stats]) => {
-        const prev = previous?.[code] || stats;
         mapInstance.setFeatureState(
-          { source: polygonPrevSourceId, id: code },
-          {
-            median_price: prev?.median_price ?? null,
-            mean_price: prev?.mean_price ?? null,
-            sales: prev?.sales ?? 0
-          }
-        );
-        mapInstance.setFeatureState(
-          { source: polygonNextSourceId, id: code },
+          { source: polygonSourceId, id: code },
           {
             median_price: stats?.median_price ?? null,
             mean_price: stats?.mean_price ?? null,
@@ -254,37 +203,7 @@ const MapEngine = ({
         );
       });
 
-      const startCrossfade = () => {
-        const start = performance.now();
-        const duration = 900;
-        const easeInOut = (t) => (t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2);
-        const step = (now) => {
-          const linear = Math.min(1, (now - start) / duration);
-          const t = easeInOut(linear);
-          blendRef.current = t;
-          const prevOpacity = polygonOpacity * (1 - t);
-          const nextOpacity = polygonOpacity * t;
-          mapInstance.setPaintProperty(polygonFillPrevId, 'fill-opacity', prevOpacity);
-          mapInstance.setPaintProperty(polygonFillNextId, 'fill-opacity', nextOpacity);
-          if (linear < 1) {
-            blendRafRef.current = requestAnimationFrame(step);
-          } else {
-            prevStatsRef.current = polygonStats;
-            if (onUpdateStateChange) onUpdateStateChange(false);
-          }
-        };
-        blendRafRef.current = requestAnimationFrame(step);
-      };
-
-      if (hadPrevious) {
-        startCrossfade();
-      } else {
-        blendRef.current = 1;
-        mapInstance.setPaintProperty(polygonFillPrevId, 'fill-opacity', 0);
-        mapInstance.setPaintProperty(polygonFillNextId, 'fill-opacity', polygonOpacity);
-        prevStatsRef.current = polygonStats;
-        if (onUpdateStateChange) onUpdateStateChange(false);
-      }
+      if (onUpdateStateChange) onUpdateStateChange(false);
     } else if (onUpdateStateChange) {
       onUpdateStateChange(false);
     }
@@ -379,8 +298,7 @@ const MapEngine = ({
 
     mapInstance.setLayoutProperty(heatmapLayerId, 'visibility', showHeatmap ? 'visible' : 'none');
     mapInstance.setLayoutProperty(dotLayerId, 'visibility', showDots ? 'visible' : 'none');
-    mapInstance.setLayoutProperty(polygonFillPrevId, 'visibility', showPolygons ? 'visible' : 'none');
-    mapInstance.setLayoutProperty(polygonFillNextId, 'visibility', showPolygons ? 'visible' : 'none');
+    mapInstance.setLayoutProperty(polygonFillId, 'visibility', showPolygons ? 'visible' : 'none');
     mapInstance.setLayoutProperty(polygonOutlineId, 'visibility', showPolygons ? 'visible' : 'none');
 
     if (!listenersAttachedRef.current) {
@@ -409,7 +327,7 @@ const MapEngine = ({
         if (!feature) return;
         const props = feature.properties || {};
         const label = props.area || props.district || props.sector || 'Area';
-        const state = mapInstance.getFeatureState({ source: polygonNextSourceId, id: feature.id });
+        const state = mapInstance.getFeatureState({ source: polygonSourceId, id: feature.id });
         const median = Number(state?.median_next);
         const meanPrice = Number(state?.mean_next);
         const sales = Number.isFinite(state?.sales_next) ? state.sales_next : 0;
@@ -434,13 +352,13 @@ const MapEngine = ({
       };
 
       mapInstance.on('mousemove', dotLayerId, handlePointHover);
-      mapInstance.on('mousemove', polygonFillNextId, handlePolygonHover);
+      mapInstance.on('mousemove', polygonFillId, handlePolygonHover);
       mapInstance.on('mouseenter', dotLayerId, setCursor);
       mapInstance.on('mouseleave', dotLayerId, resetCursor);
-      mapInstance.on('mouseenter', polygonFillNextId, setCursor);
-      mapInstance.on('mouseleave', polygonFillNextId, resetCursor);
+      mapInstance.on('mouseenter', polygonFillId, setCursor);
+      mapInstance.on('mouseleave', polygonFillId, resetCursor);
       mapInstance.on('mouseleave', dotLayerId, () => popupRef.current.remove());
-      mapInstance.on('mouseleave', polygonFillNextId, () => popupRef.current.remove());
+      mapInstance.on('mouseleave', polygonFillId, () => popupRef.current.remove());
 
       listenersAttachedRef.current = true;
     }
