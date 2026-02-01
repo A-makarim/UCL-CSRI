@@ -20,3 +20,11 @@ export const loadIndex = (dir) => fetchJson(`${DATA_BASE}/${dir}/index.json`);
 export const loadGeoForMonth = (dir, prefix, month) =>
   fetchJson(`${DATA_BASE}/${dir}/${prefix}_${month}.geojson`);
 
+export const loadStatsForMonth = (prefix, month) =>
+  fetchJson(`${DATA_BASE}/stats/${prefix}_${month}.json`);
+
+export const loadPolygons = (mode) =>
+  fetchJson(`${DATA_BASE}/polygons/${mode}.geojson`);
+
+export const loadRanges = () =>
+  fetchJson(`${DATA_BASE}/stats/ranges.json`);

@@ -11,6 +11,8 @@ PPD_DIR = ROOT / "PPD"
 CODEPO_DIR = ROOT / "codepo_gb" / "Data" / "CSV"
 GB_POSTCODES = ROOT / "gb-postcodes" / "gb-postcodes-v5"
 OUT_DIR = ROOT / "data"
+POLYGON_DIR = OUT_DIR / "polygons"
+STATS_DIR = OUT_DIR / "stats"
 
 
 def osgrid_to_latlng(easting: int, northing: int) -> Tuple[float, float]:
@@ -127,7 +129,7 @@ def load_postcode_coords() -> Dict[str, Tuple[float, float, str]]:
 
 def load_polygons(folder: Path) -> Dict[str, dict]:
     polygons = {}
-    for geojson in folder.glob("*.geojson"):
+    for geojson in folder.rglob("*.geojson"):
         code = geojson.stem
         with geojson.open("r", encoding="utf-8") as f:
             polygons[code] = json.load(f)
@@ -137,6 +139,8 @@ def load_polygons(folder: Path) -> Dict[str, dict]:
 def ensure_dirs():
     for sub in ["postcode_points", "area_geojson", "district_geojson", "sector_geojson"]:
         (OUT_DIR / sub).mkdir(parents=True, exist_ok=True)
+    POLYGON_DIR.mkdir(parents=True, exist_ok=True)
+    STATS_DIR.mkdir(parents=True, exist_ok=True)
 
 
 def write_index(months: List[str], folder: Path):
@@ -218,20 +222,16 @@ def main():
         mean = sum(prices_sorted) / n
         return (median, mean, n)
 
-    def build_polygon_features(polys: Dict[str, dict], stats: Dict[str, Dict[str, List[int]]], key_name: str, month: str):
+    def build_polygon_features(polys: Dict[str, dict], key_name: str):
         features = []
-        month_stats = stats.get(month, {})
         for code, poly in polys.items():
-            prices = month_stats.get(code, [])
-            median, mean, count = prices_to_stats(prices)
+            geometry = poly["features"][0]["geometry"] if "features" in poly else poly["geometry"]
             feature = {
                 "type": "Feature",
-                "geometry": poly["features"][0]["geometry"] if "features" in poly else poly["geometry"],
+                "id": code,
+                "geometry": geometry,
                 "properties": {
-                    key_name: code,
-                    "median_price": median,
-                    "mean_price": mean,
-                    "sales": count
+                    key_name: code
                 }
             }
             features.append(feature)
@@ -259,24 +259,71 @@ def main():
         return features
 
     print("Writing outputs...")
+
+    # Static polygons (write once)
+    area_fc = {"type": "FeatureCollection", "features": build_polygon_features(area_polys, "area")}
+    district_fc = {"type": "FeatureCollection", "features": build_polygon_features(district_polys, "district")}
+    sector_fc = {"type": "FeatureCollection", "features": build_polygon_features(sector_polys, "sector")}
+
+    (POLYGON_DIR / "areas.geojson").write_text(json.dumps(area_fc))
+    (POLYGON_DIR / "districts.geojson").write_text(json.dumps(district_fc))
+    (POLYGON_DIR / "sectors.geojson").write_text(json.dumps(sector_fc))
+
+    area_codes = list(area_polys.keys())
+    district_codes = list(district_polys.keys())
+    sector_codes = list(sector_polys.keys())
+
+    area_values = []
+    district_values = []
+    sector_values = []
+
     for month in months:
-        # Polygons
-        area_fc = {"type": "FeatureCollection", "features": build_polygon_features(area_polys, area_stats, "area", month)}
-        district_fc = {"type": "FeatureCollection", "features": build_polygon_features(district_polys, district_stats, "district", month)}
-        sector_fc = {"type": "FeatureCollection", "features": build_polygon_features(sector_polys, sector_stats, "sector", month)}
+        # Stats (small JSON maps)
+        def stats_for_month(stats: Dict[str, Dict[str, List[int]]], all_codes: List[str], collector: List[float]):
+            month_stats = stats.get(month, {})
+            out = {}
+            for code in all_codes:
+                prices = month_stats.get(code, [])
+                median, mean, count = prices_to_stats(prices)
+                out[code] = {
+                    "median_price": median,
+                    "mean_price": mean,
+                    "sales": count
+                }
+                if count > 0 and median is not None:
+                    collector.append(float(median))
+            return out
 
-        (OUT_DIR / "area_geojson" / f"area_{month}.geojson").write_text(json.dumps(area_fc))
-        (OUT_DIR / "district_geojson" / f"district_{month}.geojson").write_text(json.dumps(district_fc))
-        (OUT_DIR / "sector_geojson" / f"sector_{month}.geojson").write_text(json.dumps(sector_fc))
+        (STATS_DIR / f"area_{month}.json").write_text(json.dumps(stats_for_month(area_stats, area_codes, area_values)))
+        (STATS_DIR / f"district_{month}.json").write_text(json.dumps(stats_for_month(district_stats, district_codes, district_values)))
+        (STATS_DIR / f"sector_{month}.json").write_text(json.dumps(stats_for_month(sector_stats, sector_codes, sector_values)))
 
-        # Points
+        # Points (still per month)
         points_fc = {"type": "FeatureCollection", "features": build_point_features(pc_stats, month)}
         (OUT_DIR / "postcode_points" / f"points_{month}.geojson").write_text(json.dumps(points_fc))
 
-    write_index(months, OUT_DIR / "area_geojson")
-    write_index(months, OUT_DIR / "district_geojson")
-    write_index(months, OUT_DIR / "sector_geojson")
+    write_index(months, STATS_DIR)
     write_index(months, OUT_DIR / "postcode_points")
+
+    def quantile_range(values: List[float]):
+        if not values:
+            return {"min": 0, "max": 1}
+        values_sorted = sorted(values)
+        def pick(p: float):
+            idx = max(0, min(len(values_sorted) - 1, round(p * (len(values_sorted) - 1))))
+            return values_sorted[idx]
+        min_v = pick(0.1)
+        max_v = pick(0.9)
+        if min_v == max_v:
+            max_v = min_v + 1
+        return {"min": min_v, "max": max_v}
+
+    ranges = {
+        "area": quantile_range(area_values),
+        "district": quantile_range(district_values),
+        "sector": quantile_range(sector_values)
+    }
+    (STATS_DIR / "ranges.json").write_text(json.dumps(ranges))
 
     print("Done.")
 
