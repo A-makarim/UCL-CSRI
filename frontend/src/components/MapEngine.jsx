@@ -6,6 +6,7 @@
 
 import React, { useEffect, useRef, useState } from 'react';
 import mapboxgl from 'mapbox-gl';
+import { askAgent, fetchTransactions } from '../services/localData';
 
 mapboxgl.accessToken = import.meta.env.VITE_MAPBOX_TOKEN;
 
@@ -39,11 +40,40 @@ const formatPrice = (value) => {
   return `£${Math.round(value).toLocaleString()}`;
 };
 
+const PROPERTY_TYPE_LABELS = {
+  D: 'Detached',
+  S: 'Semi-detached',
+  T: 'Terraced',
+  F: 'Flat',
+  O: 'Other'
+};
+
+const OLD_NEW_LABELS = {
+  Y: 'New',
+  N: 'Existing'
+};
+
+const DURATION_LABELS = {
+  F: 'Freehold',
+  L: 'Leasehold'
+};
+
+const escapeHtml = (value) => {
+  if (value === null || value === undefined) return '';
+  return String(value)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+};
+
 const MapEngine = ({
   polygonData,
   polygonStats,
   polygonRange,
   polygonIdKey,
+  activeMonth,
   pointData,
   showPolygons,
   showDots,
@@ -54,10 +84,22 @@ const MapEngine = ({
   const mapContainer = useRef(null);
   const map = useRef(null);
   const mapLoadedRef = useRef(false);
-  const popupRef = useRef(null);
+  const hoverPopupRef = useRef(null);
+  const clickPopupRef = useRef(null);
   const listenersAttachedRef = useRef(false);
   const polygonKeyRef = useRef(null);
+  const activeMonthRef = useRef(activeMonth);
+  const polygonModeRef = useRef(polygonIdKey);
+  const clickSeqRef = useRef(0);
   const [mapLoaded, setMapLoaded] = useState(false);
+
+  useEffect(() => {
+    activeMonthRef.current = activeMonth;
+  }, [activeMonth]);
+
+  useEffect(() => {
+    polygonModeRef.current = polygonIdKey;
+  }, [polygonIdKey]);
 
   useEffect(() => {
     if (map.current) return;
@@ -276,7 +318,6 @@ const MapEngine = ({
         id: dotLayerId,
         type: 'circle',
         source: pointSourceId,
-        minzoom: 6,
         paint: {
           'circle-radius': [
             'interpolate',
@@ -302,22 +343,92 @@ const MapEngine = ({
     mapInstance.setLayoutProperty(polygonOutlineId, 'visibility', showPolygons ? 'visible' : 'none');
 
     if (!listenersAttachedRef.current) {
-      if (!popupRef.current) {
-        popupRef.current = new mapboxgl.Popup({ closeButton: true, closeOnClick: true });
+      if (!hoverPopupRef.current) {
+        hoverPopupRef.current = new mapboxgl.Popup({ closeButton: false, closeOnClick: false, offset: 12 });
       }
+      if (!clickPopupRef.current) {
+        clickPopupRef.current = new mapboxgl.Popup({ closeButton: true, closeOnClick: true, offset: 12 });
+      }
+
+      const buildSummaryHtml = (title, median, meanPrice, sales, subtitle) => {
+        const safeTitle = escapeHtml(title);
+        const safeSubtitle = subtitle ? `<div class="popup-sub">${escapeHtml(subtitle)}</div>` : '';
+        const meanLine = Number.isFinite(meanPrice)
+          ? `<div>Mean: ${formatPrice(meanPrice)}</div>`
+          : '';
+        return `
+          <div class="popup-title">${safeTitle}</div>
+          ${safeSubtitle}
+          <div class="popup-metrics">
+            <div>Median: ${formatPrice(median)}</div>
+            ${meanLine}
+            <div>Sales: ${Number.isFinite(sales) ? sales : 0}</div>
+          </div>
+        `;
+      };
+
+      const renderTransactionRow = (tx) => {
+        const price = formatPrice(Number(tx.price));
+        const propertyType = PROPERTY_TYPE_LABELS[tx.property_type] || tx.property_type || '';
+        const tenure = DURATION_LABELS[tx.duration] || tx.duration || '';
+        const buildType = OLD_NEW_LABELS[tx.old_new] || tx.old_new || '';
+        const addressLine = [tx.paon, tx.saon, tx.street].filter(Boolean).join(' ');
+        const localityLine = [tx.locality, tx.town_city, tx.county].filter(Boolean).join(', ');
+        const address = [addressLine, localityLine].filter(Boolean).join(', ');
+        const meta = [tx.date, tx.postcode, propertyType, tenure, buildType].filter(Boolean).join(' • ');
+        return `
+          <div class="popup-row">
+            <div class="popup-price">${escapeHtml(price)}</div>
+            <div class="popup-meta">${escapeHtml(meta)}</div>
+            ${address ? `<div class="popup-address">${escapeHtml(address)}</div>` : ''}
+          </div>
+        `;
+      };
+
+      const buildTransactionsHtml = (details, { totalOverride } = {}) => {
+        if (!details || !Array.isArray(details.transactions)) {
+          return '<div class="popup-empty">No transactions found.</div>';
+        }
+        const total = Number(details.total) || 0;
+        const shown = Number(details.shown) || details.transactions.length;
+        const note = Number.isFinite(totalOverride)
+          ? `Sample transactions (showing ${shown} of ${totalOverride} sales)`
+          : (total > shown ? `Showing ${shown} of ${total} sales` : `${total} sales`);
+        const rows = details.transactions.map(renderTransactionRow).join('');
+        return `
+          <div class="popup-note">${escapeHtml(note)}</div>
+          <div class="popup-list">${rows || '<div class="popup-empty">No transactions found.</div>'}</div>
+        `;
+      };
+
+      const buildAgentHtml = (content, { loading, error } = {}) => {
+        const body = loading
+          ? 'Generating summary…'
+          : error
+            ? 'Failed to load AI summary.'
+            : escapeHtml(content || 'No summary available.');
+        return `
+          <div class="popup-ai">
+            <div class="popup-ai-title">AI Summary</div>
+            <div class="popup-ai-body">${body}</div>
+          </div>
+        `;
+      };
 
       const handlePointHover = (event) => {
         const feature = event.features?.[0];
         if (!feature) return;
-        const { postcode, sales, median_price } = feature.properties || {};
-        popupRef.current
+        if (clickPopupRef.current?.isOpen()) return;
+        const { postcode, sales, median_price, mean_price } = feature.properties || {};
+        hoverPopupRef.current
           .setLngLat(event.lngLat)
           .setHTML(
-            `<div style="font-size:12px">
-              <div style="font-weight:600">${postcode || 'Postcode'}</div>
-              <div>Median: ${formatPrice(Number(median_price))}</div>
-              <div>Sales: ${sales || 0}</div>
-            </div>`
+            buildSummaryHtml(
+              postcode || 'Postcode',
+              Number(median_price),
+              Number(mean_price),
+              Number.isFinite(Number(sales)) ? Number(sales) : 0
+            )
           )
           .addTo(mapInstance);
       };
@@ -325,23 +436,132 @@ const MapEngine = ({
       const handlePolygonHover = (event) => {
         const feature = event.features?.[0];
         if (!feature) return;
+        if (clickPopupRef.current?.isOpen()) return;
         const props = feature.properties || {};
         const label = props.area || props.district || props.sector || 'Area';
         const state = mapInstance.getFeatureState({ source: polygonSourceId, id: feature.id });
-        const median = Number(state?.median_next);
-        const meanPrice = Number(state?.mean_next);
-        const sales = Number.isFinite(state?.sales_next) ? state.sales_next : 0;
-        popupRef.current
+        const median = Number(state?.median_price);
+        const meanPrice = Number(state?.mean_price);
+        const sales = Number.isFinite(state?.sales) ? state.sales : 0;
+        hoverPopupRef.current
           .setLngLat(event.lngLat)
           .setHTML(
-            `<div style="font-size:12px">
-              <div style="font-weight:600">${label}</div>
-              <div>Median: ${formatPrice(median)}</div>
-              ${Number.isFinite(meanPrice) ? `<div>Mean: ${formatPrice(meanPrice)}</div>` : ''}
-              <div>Sales: ${sales}</div>
-            </div>`
+            buildSummaryHtml(label, median, meanPrice, sales)
           )
           .addTo(mapInstance);
+      };
+
+      const handlePointClick = async (event) => {
+        const feature = event.features?.[0];
+        if (!feature) return;
+        const { postcode, sales, median_price, mean_price } = feature.properties || {};
+        const month = activeMonthRef.current;
+        const header = `${postcode || 'Postcode'}${month ? ` • ${month}` : ''}`;
+        const summaryHtml = buildSummaryHtml(
+          header,
+          Number(median_price),
+          Number(mean_price),
+          Number.isFinite(Number(sales)) ? Number(sales) : 0
+        );
+        const seq = ++clickSeqRef.current;
+
+        clickPopupRef.current
+          .setLngLat(event.lngLat)
+          .setHTML(`${summaryHtml}<div class="popup-loading">Loading transactions…</div>`)
+          .addTo(mapInstance);
+
+        if (!month || !postcode) {
+          clickPopupRef.current.setHTML(
+            `${summaryHtml}<div class="popup-empty">No month selected.</div>`
+          );
+          return;
+        }
+
+        try {
+          const details = await fetchTransactions({
+            month,
+            mode: 'postcode',
+            code: postcode,
+            limit: 200
+          });
+          if (seq !== clickSeqRef.current) return;
+          clickPopupRef.current.setHTML(
+            `${summaryHtml}${buildTransactionsHtml(details, { totalOverride: Number(sales) })}`
+          );
+        } catch (error) {
+          if (seq !== clickSeqRef.current) return;
+          clickPopupRef.current.setHTML(
+            `${summaryHtml}<div class="popup-empty">Failed to load transactions.</div>`
+          );
+        }
+      };
+
+      const handlePolygonClick = async (event) => {
+        const feature = event.features?.[0];
+        if (!feature) return;
+        const props = feature.properties || {};
+        const label = props.area || props.district || props.sector || 'Area';
+        const state = mapInstance.getFeatureState({ source: polygonSourceId, id: feature.id });
+        const median = Number(state?.median_price);
+        const meanPrice = Number(state?.mean_price);
+        const sales = Number.isFinite(state?.sales) ? state.sales : 0;
+        const month = activeMonthRef.current;
+        const header = `${label}${month ? ` • ${month}` : ''}`;
+        const summaryHtml = buildSummaryHtml(header, median, meanPrice, sales);
+        const seq = ++clickSeqRef.current;
+        let transactionsHtml = '<div class="popup-loading">Loading transactions…</div>';
+        let agentHtml = buildAgentHtml('', { loading: true });
+
+        clickPopupRef.current
+          .setLngLat(event.lngLat)
+          .setHTML(`${summaryHtml}${transactionsHtml}${agentHtml}`)
+          .addTo(mapInstance);
+
+        const mode = polygonModeRef.current;
+        if (!month || !mode || !feature.id) {
+          clickPopupRef.current.setHTML(
+            `${summaryHtml}<div class="popup-empty">No month selected.</div>`
+          );
+          return;
+        }
+
+        try {
+          const details = await fetchTransactions({
+            month,
+            mode,
+            code: String(feature.id),
+            limit: 200
+          });
+          if (seq !== clickSeqRef.current) return;
+          transactionsHtml = buildTransactionsHtml(details, { totalOverride: sales });
+          clickPopupRef.current.setHTML(`${summaryHtml}${transactionsHtml}${agentHtml}`);
+        } catch (error) {
+          if (seq !== clickSeqRef.current) return;
+          transactionsHtml = '<div class="popup-empty">Failed to load transactions.</div>';
+          clickPopupRef.current.setHTML(`${summaryHtml}${transactionsHtml}${agentHtml}`);
+        }
+
+        try {
+          const aiResponse = await askAgent({
+            message: `Give a concise summary about ${label} in ${month}. Highlight what the median price, mean price, and sales suggest.`,
+            history: [],
+            context: {
+              code: String(feature.id),
+              mode,
+              month,
+              median_price: median,
+              mean_price: meanPrice,
+              sales
+            }
+          });
+          if (seq !== clickSeqRef.current) return;
+          agentHtml = buildAgentHtml(aiResponse?.answer || '');
+          clickPopupRef.current.setHTML(`${summaryHtml}${transactionsHtml}${agentHtml}`);
+        } catch (error) {
+          if (seq !== clickSeqRef.current) return;
+          agentHtml = buildAgentHtml('', { error: true });
+          clickPopupRef.current.setHTML(`${summaryHtml}${transactionsHtml}${agentHtml}`);
+        }
       };
 
       const setCursor = () => {
@@ -353,12 +573,14 @@ const MapEngine = ({
 
       mapInstance.on('mousemove', dotLayerId, handlePointHover);
       mapInstance.on('mousemove', polygonFillId, handlePolygonHover);
+      mapInstance.on('click', dotLayerId, handlePointClick);
+      mapInstance.on('click', polygonFillId, handlePolygonClick);
       mapInstance.on('mouseenter', dotLayerId, setCursor);
       mapInstance.on('mouseleave', dotLayerId, resetCursor);
       mapInstance.on('mouseenter', polygonFillId, setCursor);
       mapInstance.on('mouseleave', polygonFillId, resetCursor);
-      mapInstance.on('mouseleave', dotLayerId, () => popupRef.current.remove());
-      mapInstance.on('mouseleave', polygonFillId, () => popupRef.current.remove());
+      mapInstance.on('mouseleave', dotLayerId, () => hoverPopupRef.current?.remove());
+      mapInstance.on('mouseleave', polygonFillId, () => hoverPopupRef.current?.remove());
 
       listenersAttachedRef.current = true;
     }

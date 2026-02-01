@@ -5,6 +5,7 @@
 
 import React, { useEffect, useMemo, useState } from 'react';
 import MapEngine from './components/MapEngine';
+import AgentPanel from './components/AgentPanel';
 import BottomBar from './components/BottomBar';
 import PriceLegend from './components/PriceLegend';
 import { loadGeoForMonth, loadIndex, loadPolygons, loadRanges, loadStatsForMonth } from './services/localData';
@@ -214,6 +215,7 @@ function App() {
         polygonStats={polygonStats}
         polygonRange={polygonRange}
         polygonIdKey={MODE_CONFIG[polygonMode].statsPrefix}
+        activeMonth={months[activeMonthIndex]}
         pointData={pointData}
         showPolygons={showPolygons}
         showDots={showDots}
@@ -240,6 +242,15 @@ function App() {
       {(showPolygons || showDots || showHeatmap) && (
         <PriceLegend minValue={legendRange.min} maxValue={legendRange.max} />
       )}
+      <AgentPanel
+        context={{
+          month: months[activeMonthIndex],
+          mode: polygonMode,
+          showPolygons,
+          showDots,
+          showHeatmap
+        }}
+      />
       {loading && (
         <div className="absolute top-4 left-4 text-xs text-white/50">
           Loading data…

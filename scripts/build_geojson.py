@@ -245,13 +245,14 @@ def main():
             if not coord:
                 continue
             lat, lng, pc = coord
-            median, _, count = prices_to_stats(prices)
+            median, mean, count = prices_to_stats(prices)
             feature = {
                 "type": "Feature",
                 "geometry": {"type": "Point", "coordinates": [lng, lat]},
                 "properties": {
                     "postcode": pc,
                     "median_price": median,
+                    "mean_price": mean,
                     "sales": count
                 }
             }
