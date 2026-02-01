@@ -205,6 +205,7 @@ function App() {
             coordinates: [listing.longitude, listing.latitude]
           },
           properties: {
+            value: listing.sale_price, // MapEngine expects 'value' property for heatmap
             price: listing.sale_price,
             bedrooms: listing.bedrooms,
             bathrooms: listing.bathrooms,
@@ -213,7 +214,8 @@ function App() {
             areaCode: listing.area_code_district,
             propertySize: listing.property_size,
             sizeMetric: listing.property_size_metric,
-            pricePerSqm: listing.price_per_sqm
+            pricePerSqm: listing.price_per_sqm,
+            group: 0 // Single group for live data (no blending needed)
           }
         }));
         
@@ -500,28 +502,24 @@ function App() {
 
     const { center, bbox } = targetLocation;
 
-    mapInstance.stop();
-    mapInstance.jumpTo({
-      center: [0, 20],
-      zoom: 0.8,
-      bearing: 0,
-      pitch: 0
-    });
-
     const timeout = setTimeout(() => {
-      mapInstance.setPitch(0);
-      if (bbox && bbox.length === 4) {
-        mapInstance.fitBounds(
-          [
-            [bbox[0], bbox[1]],
-            [bbox[2], bbox[3]]
-          ],
-          { padding: 60, duration: 3500, easing: (t) => t * (2 - t) }
-        );
-      } else {
-        mapInstance.flyTo({ center, zoom: 6, duration: 3500, easing: (t) => t * (2 - t) });
-      }
-    }, 1800);
+      mapInstance.stop();
+      mapInstance.easeTo({ pitch: 0, bearing: 0, duration: 500 });
+
+      setTimeout(() => {
+        if (bbox && bbox.length === 4) {
+          mapInstance.fitBounds(
+            [
+              [bbox[0], bbox[1]],
+              [bbox[2], bbox[3]]
+            ],
+            { padding: 60, duration: 2500, easing: (t) => t * (2 - t) }
+          );
+        } else {
+          mapInstance.flyTo({ center, zoom: 6, duration: 2500, easing: (t) => t * (2 - t) });
+        }
+      }, 500);
+    }, 800);
 
     return () => clearTimeout(timeout);
   }, [mapInstance, targetLocation]);
@@ -734,8 +732,8 @@ function App() {
         </div>
       </div>
       <MapEngine
-        geoData={geoData}
-        pointsData={propertyMode === 'live' && renderMode === 'points' ? livePointsData : pointsData}
+        geoData={propertyMode === 'live' ? livePointsData : geoData}
+        pointsData={propertyMode === 'live' ? livePointsData : pointsData}
         selectedVariable="price"
         activeMonth={activeMonth}
         blend={monthBlend}
