@@ -117,8 +117,8 @@ function App() {
         const geoJSON = {
           type: 'FeatureCollection',
           features: [
-            ...buildFeatures(samples[janKey] || [], 0),
-            ...buildFeatures(samples[febKey] || [], 1)
+            ...buildFeatures(samples[janKey] || [], 0, janKey),
+            ...buildFeatures(samples[febKey] || [], 1, febKey)
           ]
         };
         
@@ -149,8 +149,8 @@ function App() {
         setPointsData({
           type: 'FeatureCollection',
           features: [
-            ...buildFeatures(year1Samples, 0),
-            ...buildFeatures(year2Samples, 1)
+            ...buildFeatures(year1Samples, 0, janKey),
+            ...buildFeatures(year2Samples, 1, febKey)
           ]
         });
         
@@ -242,7 +242,6 @@ function App() {
   const rebuildGeoForBaseMonth = (baseMonth) => {
     if (!monthSamples || !salesData2025) return;
 
-    const nextMonth = baseMonth === TOTAL_MONTHS ? 1 : baseMonth + 1;
     const baseKey = getMonthKey(baseMonth);
     const nextKey = getMonthKey(nextMonth);
     const baseSales = monthSamples[baseKey] || [];
@@ -269,7 +268,7 @@ function App() {
       return fallbackKey ? monthSamples[fallbackKey] : [];
     };
 
-    const buildFeatures = (sales, group) =>
+    const buildFeatures = (sales, group, timelineDate) =>
       sales.map((sale) => ({
         type: 'Feature',
         geometry: {
@@ -284,13 +283,14 @@ function App() {
           address: sale.address,
           district: sale.district,
           propType: sale.propType,
-          date: sale.date
+          date: sale.date, // Original date from data
+          timelineDate: timelineDate || sale.date // Current timeline date
         }
       }));
 
     setGeoData({
       type: 'FeatureCollection',
-      features: [...buildFeatures(baseSales, 0), ...buildFeatures(nextSales, 1)]
+      features: [...buildFeatures(baseSales, 0, baseKey), ...buildFeatures(nextSales, 1, nextKey)]
     });
 
     const pickRandom = (items, count) => {
@@ -324,8 +324,8 @@ function App() {
       setPointsData({
         type: 'FeatureCollection',
         features: [
-          ...buildFeatures(currentSampled, 0),
-          ...buildFeatures(nextSampled, 1)
+          ...buildFeatures(currentSampled, 0, currentYearKey),
+          ...buildFeatures(nextSampled, 1, nextYearKey)
         ]
       });
     } else if (renderMode === 'continuous') {
@@ -333,7 +333,7 @@ function App() {
       // Show ALL points instead of sampling to maintain consistency across years
       setPointsData({
         type: 'FeatureCollection',
-        features: buildFeatures(pointsSales, 0)
+        features: buildFeatures(pointsSales, 0, baseKey)
       });
     }
 
