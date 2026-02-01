@@ -14,7 +14,7 @@ const DEFAULT_ZOOM = 0.8;
 
 const EMPTY_GEOJSON = { type: 'FeatureCollection', features: [] };
 
-const getRange = (geoData) => {
+const getPointRange = (geoData) => {
   const values = (geoData?.features || [])
     .map((f) => Number(f?.properties?.median_price))
     .filter((v) => Number.isFinite(v));
@@ -41,18 +41,26 @@ const formatPrice = (value) => {
 
 const MapEngine = ({
   polygonData,
+  polygonStats,
+  polygonRange,
+  polygonIdKey,
   pointData,
   showPolygons,
   showDots,
   showHeatmap,
-  onMapLoad
+  onMapLoad,
+  onUpdateStateChange
 }) => {
   const mapContainer = useRef(null);
   const map = useRef(null);
   const mapLoadedRef = useRef(false);
   const popupRef = useRef(null);
   const listenersAttachedRef = useRef(false);
+  const polygonKeyRef = useRef(null);
   const [mapLoaded, setMapLoaded] = useState(false);
+  const prevStatsRef = useRef(null);
+  const blendRef = useRef(1);
+  const blendRafRef = useRef(null);
 
   useEffect(() => {
     if (map.current) return;
@@ -98,30 +106,34 @@ const MapEngine = ({
     if (!map.current || !mapLoadedRef.current) return;
 
     const mapInstance = map.current;
-    const polygonSourceId = 'polygon-source';
-    const polygonFillId = 'polygon-fill';
+    const polygonPrevSourceId = 'polygon-source-prev';
+    const polygonNextSourceId = 'polygon-source-next';
+    const polygonFillPrevId = 'polygon-fill-prev';
+    const polygonFillNextId = 'polygon-fill-next';
     const polygonOutlineId = 'polygon-outline';
     const pointSourceId = 'point-source';
     const heatmapLayerId = 'point-heatmap';
     const dotLayerId = 'point-dots';
 
-    const polygonRange = getRange(polygonData);
-    const pointRange = getRange(pointData);
+    const range = polygonRange || { min: 0, max: 1 };
+    const pointRange = getPointRange(pointData);
 
     const polygonOpacity = showHeatmap ? 0.6 : 0.78;
-    const polygonColor = [
+    const buildPolygonColor = [
       'case',
-      ['!', ['has', 'median_price']],
+      ['==', ['feature-state', 'sales'], null],
+      '#1d1f24',
+      ['<=', ['feature-state', 'sales'], 0],
       '#1d1f24',
       [
         'interpolate',
         ['linear'],
-        ['coalesce', ['get', 'median_price'], 0],
-        polygonRange.min, '#16243a',
-        polygonRange.min + (polygonRange.max - polygonRange.min) * 0.25, '#1b6f7a',
-        polygonRange.min + (polygonRange.max - polygonRange.min) * 0.5, '#4ab869',
-        polygonRange.min + (polygonRange.max - polygonRange.min) * 0.75, '#e2c35b',
-        polygonRange.max, '#f05b4c'
+        ['feature-state', 'median_price'],
+        range.min, '#16243a',
+        range.min + (range.max - range.min) * 0.25, '#1b6f7a',
+        range.min + (range.max - range.min) * 0.5, '#4ab869',
+        range.min + (range.max - range.min) * 0.75, '#e2c35b',
+        range.max, '#f05b4c'
       ]
     ];
 
@@ -136,13 +148,145 @@ const MapEngine = ({
       pointRange.max, '#f05b4c'
     ];
 
-    if (!mapInstance.getSource(polygonSourceId)) {
-      mapInstance.addSource(polygonSourceId, {
+    const needsPolygonSourceReset =
+      !mapInstance.getSource(polygonPrevSourceId) ||
+      !mapInstance.getSource(polygonNextSourceId) ||
+      polygonKeyRef.current !== polygonIdKey;
+
+    if (needsPolygonSourceReset) {
+      if (mapInstance.getLayer(polygonFillPrevId)) mapInstance.removeLayer(polygonFillPrevId);
+      if (mapInstance.getLayer(polygonFillNextId)) mapInstance.removeLayer(polygonFillNextId);
+      if (mapInstance.getLayer(polygonOutlineId)) mapInstance.removeLayer(polygonOutlineId);
+      if (mapInstance.getSource(polygonPrevSourceId)) mapInstance.removeSource(polygonPrevSourceId);
+      if (mapInstance.getSource(polygonNextSourceId)) mapInstance.removeSource(polygonNextSourceId);
+
+      mapInstance.addSource(polygonPrevSourceId, {
         type: 'geojson',
-        data: polygonData || EMPTY_GEOJSON
+        data: polygonData || EMPTY_GEOJSON,
+        promoteId: polygonIdKey || undefined
+      });
+      mapInstance.addSource(polygonNextSourceId, {
+        type: 'geojson',
+        data: polygonData || EMPTY_GEOJSON,
+        promoteId: polygonIdKey || undefined
+      });
+      polygonKeyRef.current = polygonIdKey;
+      prevStatsRef.current = null;
+    } else {
+      mapInstance.getSource(polygonPrevSourceId).setData(polygonData || EMPTY_GEOJSON);
+      mapInstance.getSource(polygonNextSourceId).setData(polygonData || EMPTY_GEOJSON);
+    }
+
+    const prevOpacity = polygonOpacity * (1 - blendRef.current);
+    const nextOpacity = polygonOpacity * blendRef.current;
+
+    if (!mapInstance.getLayer(polygonFillPrevId)) {
+      mapInstance.addLayer({
+        id: polygonFillPrevId,
+        type: 'fill',
+        source: polygonPrevSourceId,
+        paint: {
+          'fill-color': buildPolygonColor,
+          'fill-opacity': prevOpacity
+        }
       });
     } else {
-      mapInstance.getSource(polygonSourceId).setData(polygonData || EMPTY_GEOJSON);
+      mapInstance.setPaintProperty(polygonFillPrevId, 'fill-color', buildPolygonColor);
+      mapInstance.setPaintProperty(polygonFillPrevId, 'fill-opacity', prevOpacity);
+    }
+
+    if (!mapInstance.getLayer(polygonFillNextId)) {
+      mapInstance.addLayer({
+        id: polygonFillNextId,
+        type: 'fill',
+        source: polygonNextSourceId,
+        paint: {
+          'fill-color': buildPolygonColor,
+          'fill-opacity': nextOpacity
+        }
+      });
+    } else {
+      mapInstance.setPaintProperty(polygonFillNextId, 'fill-color', buildPolygonColor);
+      mapInstance.setPaintProperty(polygonFillNextId, 'fill-opacity', nextOpacity);
+    }
+
+    if (!mapInstance.getLayer(polygonOutlineId)) {
+      mapInstance.addLayer({
+        id: polygonOutlineId,
+        type: 'line',
+        source: polygonNextSourceId,
+        paint: {
+          'line-color': 'rgba(255,255,255,0.25)',
+          'line-width': 0.6
+        }
+      });
+    }
+
+    if (polygonStats) {
+      const entries = Object.entries(polygonStats);
+      const previous = prevStatsRef.current || polygonStats;
+      const hadPrevious = prevStatsRef.current != null;
+
+      if (blendRafRef.current) {
+        cancelAnimationFrame(blendRafRef.current);
+        blendRafRef.current = null;
+      }
+
+      if (onUpdateStateChange) onUpdateStateChange(true);
+
+      entries.forEach(([code, stats]) => {
+        const prev = previous?.[code] || stats;
+        mapInstance.setFeatureState(
+          { source: polygonPrevSourceId, id: code },
+          {
+            median_price: prev?.median_price ?? null,
+            mean_price: prev?.mean_price ?? null,
+            sales: prev?.sales ?? 0
+          }
+        );
+        mapInstance.setFeatureState(
+          { source: polygonNextSourceId, id: code },
+          {
+            median_price: stats?.median_price ?? null,
+            mean_price: stats?.mean_price ?? null,
+            sales: stats?.sales ?? 0
+          }
+        );
+      });
+
+      const startCrossfade = () => {
+        const start = performance.now();
+        const duration = 900;
+        const easeInOut = (t) => (t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2);
+        const step = (now) => {
+          const linear = Math.min(1, (now - start) / duration);
+          const t = easeInOut(linear);
+          blendRef.current = t;
+          const prevOpacity = polygonOpacity * (1 - t);
+          const nextOpacity = polygonOpacity * t;
+          mapInstance.setPaintProperty(polygonFillPrevId, 'fill-opacity', prevOpacity);
+          mapInstance.setPaintProperty(polygonFillNextId, 'fill-opacity', nextOpacity);
+          if (linear < 1) {
+            blendRafRef.current = requestAnimationFrame(step);
+          } else {
+            prevStatsRef.current = polygonStats;
+            if (onUpdateStateChange) onUpdateStateChange(false);
+          }
+        };
+        blendRafRef.current = requestAnimationFrame(step);
+      };
+
+      if (hadPrevious) {
+        startCrossfade();
+      } else {
+        blendRef.current = 1;
+        mapInstance.setPaintProperty(polygonFillPrevId, 'fill-opacity', 0);
+        mapInstance.setPaintProperty(polygonFillNextId, 'fill-opacity', polygonOpacity);
+        prevStatsRef.current = polygonStats;
+        if (onUpdateStateChange) onUpdateStateChange(false);
+      }
+    } else if (onUpdateStateChange) {
+      onUpdateStateChange(false);
     }
 
     if (!mapInstance.getSource(pointSourceId)) {
@@ -208,33 +352,6 @@ const MapEngine = ({
       });
     }
 
-    if (!mapInstance.getLayer(polygonFillId)) {
-      mapInstance.addLayer({
-        id: polygonFillId,
-        type: 'fill',
-        source: polygonSourceId,
-        paint: {
-          'fill-color': polygonColor,
-          'fill-opacity': polygonOpacity
-        }
-      });
-    } else {
-      mapInstance.setPaintProperty(polygonFillId, 'fill-color', polygonColor);
-      mapInstance.setPaintProperty(polygonFillId, 'fill-opacity', polygonOpacity);
-    }
-
-    if (!mapInstance.getLayer(polygonOutlineId)) {
-      mapInstance.addLayer({
-        id: polygonOutlineId,
-        type: 'line',
-        source: polygonSourceId,
-        paint: {
-          'line-color': 'rgba(255,255,255,0.25)',
-          'line-width': 0.6
-        }
-      });
-    }
-
     if (!mapInstance.getLayer(dotLayerId)) {
       mapInstance.addLayer({
         id: dotLayerId,
@@ -262,7 +379,8 @@ const MapEngine = ({
 
     mapInstance.setLayoutProperty(heatmapLayerId, 'visibility', showHeatmap ? 'visible' : 'none');
     mapInstance.setLayoutProperty(dotLayerId, 'visibility', showDots ? 'visible' : 'none');
-    mapInstance.setLayoutProperty(polygonFillId, 'visibility', showPolygons ? 'visible' : 'none');
+    mapInstance.setLayoutProperty(polygonFillPrevId, 'visibility', showPolygons ? 'visible' : 'none');
+    mapInstance.setLayoutProperty(polygonFillNextId, 'visibility', showPolygons ? 'visible' : 'none');
     mapInstance.setLayoutProperty(polygonOutlineId, 'visibility', showPolygons ? 'visible' : 'none');
 
     if (!listenersAttachedRef.current) {
@@ -291,15 +409,18 @@ const MapEngine = ({
         if (!feature) return;
         const props = feature.properties || {};
         const label = props.area || props.district || props.sector || 'Area';
-        const meanPrice = Number(props.mean_price);
+        const state = mapInstance.getFeatureState({ source: polygonNextSourceId, id: feature.id });
+        const median = Number(state?.median_next);
+        const meanPrice = Number(state?.mean_next);
+        const sales = Number.isFinite(state?.sales_next) ? state.sales_next : 0;
         popupRef.current
           .setLngLat(event.lngLat)
           .setHTML(
             `<div style="font-size:12px">
               <div style="font-weight:600">${label}</div>
-              <div>Median: ${formatPrice(Number(props.median_price))}</div>
+              <div>Median: ${formatPrice(median)}</div>
               ${Number.isFinite(meanPrice) ? `<div>Mean: ${formatPrice(meanPrice)}</div>` : ''}
-              <div>Sales: ${props.sales || 0}</div>
+              <div>Sales: ${sales}</div>
             </div>`
           )
           .addTo(mapInstance);
@@ -313,17 +434,17 @@ const MapEngine = ({
       };
 
       mapInstance.on('mousemove', dotLayerId, handlePointHover);
-      mapInstance.on('mousemove', polygonFillId, handlePolygonHover);
+      mapInstance.on('mousemove', polygonFillNextId, handlePolygonHover);
       mapInstance.on('mouseenter', dotLayerId, setCursor);
       mapInstance.on('mouseleave', dotLayerId, resetCursor);
-      mapInstance.on('mouseenter', polygonFillId, setCursor);
-      mapInstance.on('mouseleave', polygonFillId, resetCursor);
+      mapInstance.on('mouseenter', polygonFillNextId, setCursor);
+      mapInstance.on('mouseleave', polygonFillNextId, resetCursor);
       mapInstance.on('mouseleave', dotLayerId, () => popupRef.current.remove());
-      mapInstance.on('mouseleave', polygonFillId, () => popupRef.current.remove());
+      mapInstance.on('mouseleave', polygonFillNextId, () => popupRef.current.remove());
 
       listenersAttachedRef.current = true;
     }
-  }, [polygonData, pointData, showPolygons, showDots, showHeatmap, mapLoaded]);
+  }, [polygonData, polygonStats, polygonRange, polygonIdKey, pointData, showPolygons, showDots, showHeatmap, mapLoaded, onUpdateStateChange]);
 
   return (
     <div

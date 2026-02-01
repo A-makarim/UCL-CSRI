@@ -7,20 +7,35 @@ import React, { useEffect, useMemo, useState } from 'react';
 import MapEngine from './components/MapEngine';
 import BottomBar from './components/BottomBar';
 import PriceLegend from './components/PriceLegend';
-import { loadGeoForMonth, loadIndex } from './services/localData';
+import { loadGeoForMonth, loadIndex, loadPolygons, loadRanges, loadStatsForMonth } from './services/localData';
 
 const MODE_CONFIG = {
-  area: { dir: 'area_geojson', prefix: 'area' },
-  district: { dir: 'district_geojson', prefix: 'district' },
-  sector: { dir: 'sector_geojson', prefix: 'sector' }
+  area: { polygonFile: 'areas', statsPrefix: 'area' },
+  district: { polygonFile: 'districts', statsPrefix: 'district' },
+  sector: { polygonFile: 'sectors', statsPrefix: 'sector' }
 };
 
-const getRange = (geoData) => {
+const getStatsRange = (stats) => {
+  if (!stats) return { min: 0, max: 0 };
+  const values = Object.values(stats)
+    .map((v) => Number(v?.median_price))
+    .filter((v) => Number.isFinite(v));
+  if (!values.length) return { min: 0, max: 0 };
+  const sorted = [...values].sort((a, b) => a - b);
+  const pick = (p) => sorted[Math.max(0, Math.min(sorted.length - 1, Math.round(p * (sorted.length - 1))))];
+  const min = pick(0.1);
+  const max = pick(0.9);
+  return { min, max: Math.max(max, min + 1) };
+};
+
+const getPointRange = (geoData) => {
   const values = (geoData?.features || [])
     .map((f) => Number(f?.properties?.median_price))
     .filter((v) => Number.isFinite(v));
   if (!values.length) return { min: 0, max: 0 };
-  return { min: Math.min(...values), max: Math.max(...values) };
+  const min = Math.min(...values);
+  const max = Math.max(...values);
+  return { min, max: Math.max(max, min + 1) };
 };
 
 function App() {
@@ -33,7 +48,10 @@ function App() {
   const [showDots, setShowDots] = useState(false);
   const [showHeatmap, setShowHeatmap] = useState(false);
   const [polygonData, setPolygonData] = useState(null);
+  const [polygonStats, setPolygonStats] = useState(null);
   const [pointData, setPointData] = useState(null);
+  const [isUpdating, setIsUpdating] = useState(false);
+  const [polygonRanges, setPolygonRanges] = useState(null);
 
   const [targetLocation, setTargetLocation] = useState({
     center: [-0.1276, 51.5074],
@@ -47,19 +65,21 @@ function App() {
     const loadIndexes = async () => {
       setLoading(true);
       try {
-        const [polyIndex, pointIndex] = await Promise.all([
-          loadIndex(MODE_CONFIG[polygonMode].dir),
-          loadIndex('postcode_points')
+        const [statsIndex, pointIndex, ranges] = await Promise.all([
+          loadIndex('stats'),
+          loadIndex('postcode_points'),
+          loadRanges().catch(() => null)
         ]);
 
         if (cancelled) return;
 
-        const list = polyIndex?.months?.length
-          ? polyIndex.months
+        const list = statsIndex?.months?.length
+          ? statsIndex.months
           : pointIndex?.months || [];
 
         setMonths(list);
         setActiveMonthIndex(list.length ? 0 : 0);
+        setPolygonRanges(ranges);
       } catch (error) {
         console.error('Failed to load month index:', error);
       } finally {
@@ -79,26 +99,26 @@ function App() {
     let cancelled = false;
 
     const month = months[activeMonthIndex];
-    const { dir, prefix } = MODE_CONFIG[polygonMode];
+    const { statsPrefix } = MODE_CONFIG[polygonMode];
 
     const loadMonthData = async () => {
       setLoading(true);
       try {
-        const [polygons, points] = await Promise.all([
-          showPolygons ? loadGeoForMonth(dir, prefix, month) : Promise.resolve(null),
+        const [stats, points] = await Promise.all([
+          loadStatsForMonth(statsPrefix, month),
           showDots || showHeatmap
             ? loadGeoForMonth('postcode_points', 'points', month)
             : Promise.resolve(null)
         ]);
 
         if (cancelled) return;
-        setPolygonData(polygons);
+        setPolygonStats(stats);
         setPointData(points);
 
         const prefetch = (idx) => {
           if (idx < 0 || idx >= months.length) return;
           const m = months[idx];
-          loadGeoForMonth(dir, prefix, m).catch(() => {});
+          loadStatsForMonth(statsPrefix, m).catch(() => {});
           if (showDots || showHeatmap) {
             loadGeoForMonth('postcode_points', 'points', m).catch(() => {});
           }
@@ -108,7 +128,7 @@ function App() {
       } catch (error) {
         console.error('Failed to load monthly data:', error);
         if (!cancelled) {
-          setPolygonData(null);
+          setPolygonStats(null);
           setPointData(null);
         }
       } finally {
@@ -122,6 +142,30 @@ function App() {
       cancelled = true;
     };
   }, [months, activeMonthIndex, polygonMode, showPolygons, showDots, showHeatmap]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const loadPolys = async () => {
+      try {
+        const { polygonFile } = MODE_CONFIG[polygonMode];
+        setPolygonStats(null);
+        const polygons = await loadPolygons(polygonFile);
+        if (!cancelled) {
+          setPolygonData(polygons);
+        }
+      } catch (error) {
+        console.error('Failed to load polygons:', error);
+        if (!cancelled) setPolygonData(null);
+      }
+    };
+
+    loadPolys();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [polygonMode]);
 
   useEffect(() => {
     if (!mapInstance || !targetLocation) return;
@@ -154,26 +198,35 @@ function App() {
     return () => clearTimeout(timeout);
   }, [mapInstance, targetLocation]);
 
+  const polygonRange = useMemo(() => {
+    if (polygonRanges?.[polygonMode]) return polygonRanges[polygonMode];
+    return getStatsRange(polygonStats);
+  }, [polygonRanges, polygonMode, polygonStats]);
+
   const legendRange = useMemo(() => {
-    const source = showPolygons ? polygonData : pointData;
-    return getRange(source);
-  }, [polygonData, pointData, showPolygons]);
+    return showPolygons ? polygonRange : getPointRange(pointData);
+  }, [polygonRange, pointData, showPolygons]);
 
   return (
     <div className="relative w-full h-screen bg-black overflow-hidden">
       <MapEngine
         polygonData={polygonData}
+        polygonStats={polygonStats}
+        polygonRange={polygonRange}
+        polygonIdKey={MODE_CONFIG[polygonMode].statsPrefix}
         pointData={pointData}
         showPolygons={showPolygons}
         showDots={showDots}
         showHeatmap={showHeatmap}
         onMapLoad={setMapInstance}
+        onUpdateStateChange={setIsUpdating}
       />
       {months.length > 0 && (
         <BottomBar
           months={months}
           activeIndex={activeMonthIndex}
           onIndexChange={setActiveMonthIndex}
+          isUpdating={isUpdating}
           mode={polygonMode}
           onModeChange={setPolygonMode}
           showPolygons={showPolygons}

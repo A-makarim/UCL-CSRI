@@ -13,7 +13,7 @@ const formatMonth = (value) => {
   return `${monthNames[(month || 1) - 1]} ${year}`;
 };
 
-const TimeSlider = ({ months, activeIndex, onIndexChange }) => {
+const TimeSlider = ({ months, activeIndex, onIndexChange, isUpdating }) => {
   const sliderRef = useRef(null);
   const [isDragging, setIsDragging] = useState(false);
   const [isPlaying, setIsPlaying] = useState(false);
@@ -23,12 +23,17 @@ const TimeSlider = ({ months, activeIndex, onIndexChange }) => {
   const playValue = useRef(activeIndex);
   const maxIndex = Math.max(0, (months?.length || 1) - 1);
 
-  const updateIndex = (clientX) => {
+  const updateIndex = (clientX, immediate = false) => {
     if (!sliderRef.current || maxIndex === 0) return;
 
     const rect = sliderRef.current.getBoundingClientRect();
     const percentage = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width));
     const nextIndex = Math.round(percentage * maxIndex);
+
+    if (immediate) {
+      onIndexChange(nextIndex);
+      return;
+    }
 
     if (animationFrame.current) {
       cancelAnimationFrame(animationFrame.current);
@@ -39,35 +44,33 @@ const TimeSlider = ({ months, activeIndex, onIndexChange }) => {
     });
   };
 
-  const handleMouseDown = (e) => {
+  const handlePointerDown = (e) => {
+    if (e.target.setPointerCapture) {
+      e.target.setPointerCapture(e.pointerId);
+    }
     setIsDragging(true);
     setIsPlaying(false);
-    updateIndex(e.clientX);
+    updateIndex(e.clientX, true);
   };
 
-  const handleMouseMove = (e) => {
+  const handlePointerMove = (e) => {
     if (isDragging) {
-      updateIndex(e.clientX);
+      updateIndex(e.clientX, true);
     }
   };
 
-  const handleMouseUp = () => {
+  const handlePointerUp = (e) => {
     setIsDragging(false);
+    if (e.target.releasePointerCapture) {
+      e.target.releasePointerCapture(e.pointerId);
+    }
     if (animationFrame.current) {
       cancelAnimationFrame(animationFrame.current);
     }
   };
 
   useEffect(() => {
-    if (isDragging) {
-      window.addEventListener('mousemove', handleMouseMove);
-      window.addEventListener('mouseup', handleMouseUp);
-    }
-
-    return () => {
-      window.removeEventListener('mousemove', handleMouseMove);
-      window.removeEventListener('mouseup', handleMouseUp);
-    };
+    return () => {};
   }, [isDragging]);
 
   useEffect(() => {
@@ -81,6 +84,11 @@ const TimeSlider = ({ months, activeIndex, onIndexChange }) => {
       if (lastTick.current == null) lastTick.current = now;
       const dt = Math.min(0.05, (now - lastTick.current) / 1000);
       lastTick.current = now;
+
+      if (isUpdating) {
+        playRaf.current = requestAnimationFrame(tick);
+        return;
+      }
 
       const next = playValue.current + monthsPerSecond * dt;
       let wrapped = next;
@@ -101,7 +109,7 @@ const TimeSlider = ({ months, activeIndex, onIndexChange }) => {
       }
       lastTick.current = null;
     };
-  }, [isPlaying, maxIndex, activeIndex, onIndexChange]);
+  }, [isPlaying, maxIndex, activeIndex, onIndexChange, isUpdating]);
 
   const percentage = maxIndex === 0 ? 0 : (activeIndex / maxIndex) * 100;
   const displayLabel = formatMonth(months?.[activeIndex]);
@@ -140,8 +148,10 @@ const TimeSlider = ({ months, activeIndex, onIndexChange }) => {
         </button>
         <div
           ref={sliderRef}
-          className="relative h-1.5 flex-1 cursor-pointer overflow-hidden rounded-full bg-white/10"
-          onMouseDown={handleMouseDown}
+          className="relative h-3 flex-1 cursor-pointer overflow-hidden rounded-full bg-white/10"
+          onPointerDown={handlePointerDown}
+          onPointerMove={handlePointerMove}
+          onPointerUp={handlePointerUp}
         >
           <motion.div
             className="absolute h-full rounded-full bg-gradient-to-r from-cyan-400 to-cyan-300"
@@ -151,7 +161,7 @@ const TimeSlider = ({ months, activeIndex, onIndexChange }) => {
             transition={{ duration: 0.2 }}
           />
           <motion.div
-            className="absolute top-1/2 h-4 w-4 -translate-y-1/2 -translate-x-1/2 rounded-full border border-white/30 bg-white/80 shadow-[0_0_12px_rgba(56,189,248,0.6)]"
+            className="absolute top-1/2 h-6 w-6 -translate-y-1/2 -translate-x-1/2 rounded-full border border-white/30 bg-white/90 shadow-[0_0_14px_rgba(56,189,248,0.7)]"
             style={{ left: `${percentage}%` }}
             animate={{ scale: isDragging ? 1.2 : 1 }}
             transition={{ duration: 0.1 }}
