@@ -1,28 +1,19 @@
-// Simple Express server for AI API
-const express = require('express');
-const cors = require('cors');
+// Vercel serverless function for image scraping
 const fetch = require('node-fetch');
 const cheerio = require('cheerio');
-const { askPerplexity } = require('./src/lib/perplexityAPI.cjs');
 
-const app = express();
-const PORT = process.env.PORT || 3002;
+module.exports = async (req, res) => {
+  // Enable CORS
+  res.setHeader('Access-Control-Allow-Credentials', true);
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'GET,OPTIONS,PATCH,DELETE,POST,PUT');
+  res.setHeader('Access-Control-Allow-Headers', 'X-CSRF-Token, X-Requested-With, Accept, Accept-Version, Content-Length, Content-MD5, Content-Type, Date, X-Api-Version');
 
-app.use(cors({
-  origin: process.env.NODE_ENV === 'production' 
-    ? ['https://ucl-csri-frontend.onrender.com', 'https://ucl-csri.onrender.com']
-    : '*',
-  credentials: true
-}));
-app.use(express.json());
+  if (req.method === 'OPTIONS') {
+    res.status(200).end();
+    return;
+  }
 
-// Health check endpoint for Render
-app.get('/', (req, res) => {
-  res.json({ status: 'ok', message: 'UCL-CSRI API Server Running' });
-});
-
-// Scrape images from Zoopla listing
-app.post('/api/scrape-images', async (req, res) => {
   try {
     const { url } = req.body;
     
@@ -42,21 +33,15 @@ app.post('/api/scrape-images', async (req, res) => {
       return response.text();
     };
 
-    // Fetch the page (direct)
     let html = await fetchHtml(url);
     let $ = cheerio.load(html);
     
-    // Extract images from Zoopla's photo gallery
     const imageUrls = [];
     
-    // Zoopla stores images in various places, try multiple selectors
-    // Look for ANY image on the page (more aggressive approach)
     $('img, picture source').each((i, el) => {
       const src = $(el).attr('src') || $(el).attr('data-src') || $(el).attr('srcset') || $(el).attr('data-lazy');
       if (src && !src.includes('logo') && !src.includes('icon') && !src.includes('avatar') && !src.includes('placeholder')) {
-        // Get highest quality version
         let cleanUrl = src.split(',')[0].split(' ')[0];
-        // Replace size parameters to get high-res version if it's a Zoopla image
         if (cleanUrl.includes('zoopla')) {
           cleanUrl = cleanUrl.replace(/\/\d+x\d+\//, '/1024x768/');
         }
@@ -66,7 +51,6 @@ app.post('/api/scrape-images', async (req, res) => {
       }
     });
     
-    // Also look for data attributes commonly used for lazy loading
     $('[data-srcset], [data-lazy-src]').each((i, el) => {
       const src = $(el).attr('data-srcset') || $(el).attr('data-lazy-src');
       if (src && !src.includes('logo')) {
@@ -77,9 +61,8 @@ app.post('/api/scrape-images', async (req, res) => {
       }
     });
     
-    console.log(`🔍 Found ${imageUrls.length} image URLs from img tags`);
+    console.log(`🔍 Found ${imageUrls.length} image URLs`);
     
-    // Also check for Open Graph / meta images
     $('meta[property="og:image"], meta[property="og:image:secure_url"], meta[name="twitter:image"]').each((i, el) => {
       const content = $(el).attr('content');
       if (content && content.startsWith('http') && !imageUrls.includes(content)) {
@@ -87,7 +70,6 @@ app.post('/api/scrape-images', async (req, res) => {
       }
     });
 
-    // Also check for JSON-LD structured data
     $('script[type="application/ld+json"]').each((i, el) => {
       try {
         const json = JSON.parse($(el).html());
@@ -103,7 +85,6 @@ app.post('/api/scrape-images', async (req, res) => {
       } catch (e) {}
     });
 
-    // If no images found, try Jina AI proxy to bypass protections
     if (imageUrls.length === 0) {
       try {
         const proxyUrl = `https://r.jina.ai/http://` + url.replace(/^https?:\/\//, '');
@@ -133,9 +114,8 @@ app.post('/api/scrape-images', async (req, res) => {
     
     console.log(`📥 Downloading ${Math.min(imageUrls.length, 8)} images...`);
     
-    // Download images and convert to base64
     const base64Images = [];
-    const maxImages = Math.min(imageUrls.length, 8); // Limit to 8 images
+    const maxImages = Math.min(imageUrls.length, 8);
     
     for (let i = 0; i < maxImages; i++) {
       try {
@@ -164,24 +144,4 @@ app.post('/api/scrape-images', async (req, res) => {
     console.error('❌ Scrape Error:', error);
     res.status(500).json({ error: error.message });
   }
-});
-
-app.post('/api/ask-ai', async (req, res) => {
-  try {
-    const { question, areaInfo, conversationHistory } = req.body;
-    
-    console.log('📨 AI Request:', question.substring(0, 100) + '...');
-    
-    const result = await askPerplexity(question, areaInfo, conversationHistory);
-    
-    console.log('✅ AI Response sent');
-    res.json(result);
-  } catch (error) {
-    console.error('❌ API Error:', error);
-    res.status(500).json({ error: error.message });
-  }
-});
-
-app.listen(PORT, () => {
-  console.log(`🤖 AI API server running on http://localhost:${PORT}`);
-});
+};

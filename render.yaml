@@ -1,0 +1,37 @@
+services:
+  # Backend API Server
+  - type: web
+    name: ucl-csri-backend
+    env: node
+    region: oregon
+    plan: free
+    buildCommand: npm install
+    startCommand: node server.cjs
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PERPLEXITY_API_KEY
+        sync: false
+      - key: SCANSAN_API_KEY
+        sync: false
+    healthCheckPath: /
+
+  # Frontend Static Site
+  - type: web
+    name: ucl-csri-frontend
+    env: static
+    region: oregon
+    plan: free
+    buildCommand: cd frontend && npm install && npm run build
+    staticPublishPath: ./frontend/dist
+    routes:
+      - type: rewrite
+        source: /api/*
+        destination: https://ucl-csri-backend.onrender.com/api/*
+    envVars:
+      - key: VITE_MAPBOX_TOKEN
+        sync: false
+      - key: VITE_SCANSAN_API_KEY
+        sync: false
+      - key: VITE_SCANSAN_BASE_URL
+        value: /api/v1

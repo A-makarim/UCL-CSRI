@@ -1,0 +1,27 @@
+{
+  "version": 2,
+  "buildCommand": "cd frontend && npm install && npm run build",
+  "outputDirectory": "frontend/dist",
+  "framework": "vite",
+  "rewrites": [
+    {
+      "source": "/api/(.*)",
+      "destination": "/api/$1"
+    },
+    {
+      "source": "/(.*)",
+      "destination": "/index.html"
+    }
+  ],
+  "functions": {
+    "api/*.js": {
+      "maxDuration": 30
+    }
+  },
+  "env": {
+    "VITE_MAPBOX_TOKEN": "@mapbox_token",
+    "VITE_SCANSAN_API_KEY": "@scansan_api_key",
+    "VITE_SCANSAN_BASE_URL": "/api/v1",
+    "PERPLEXITY_API_KEY": "@perplexity_api_key"
+  }
+}
