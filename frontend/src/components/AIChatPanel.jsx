@@ -74,13 +74,13 @@ ${areaInfo.propertySize ? `Size: ${areaInfo.propertySize} ${areaInfo.sizeMetric}
 Listing URL: ${areaInfo.listingUrl}
 
 Please analyze this property and provide:
-1. Is this price competitive for the area and property specs?
-2. Market trends for this specific area (${areaInfo.areaCode})
-3. Should I consider making an offer below asking price? How much room for negotiation?
-4. Is this a good time to buy or should I wait for price drops?
-5. Future price predictions for this area (next 12-24 months)
-6. Investment potential and rental yield estimates
-7. Environmental sustainability and energy efficiency considerations
+1. **Ecology & Sustainability**: Does this property follow modern ecological standards? Energy efficiency rating, green features, carbon footprint, renewable energy potential, insulation quality, sustainable materials
+2. Is this price competitive for the area and property specs?
+3. Market trends for this specific area (${areaInfo.areaCode})
+4. Should I consider making an offer below asking price? How much room for negotiation? Suggest a specific offer price.
+5. Is this a good time to buy or should I wait for price drops?
+6. Future price predictions for this area (next 12-24 months)
+7. Investment potential and rental yield estimates
 8. Any red flags or concerns about this property or location
 
 Be specific and reference current market data.`;
@@ -118,6 +118,124 @@ Context: ${areaInfo.median ? `Current median price: £${areaInfo.median?.toLocal
     setMessages(prev => [...prev, userMessage]);
     setInputValue('');
     setIsLoading(true);
+
+    // Check if user wants to send an email (flexible natural language detection)
+    const lowerQuestion = question.toLowerCase().trim();
+    const emailIntentPatterns = [
+      /send.*email/,
+      /send.*offer/,
+      /send.*quote/,
+      /email.*seller/,
+      /send.*inquiry/,
+      /send.*enquiry/,
+      /make.*offer/,
+      /submit.*offer/,
+      /can you send/,
+      /could you send/,
+      /please send/,
+      /go ahead.*send/
+    ];
+    const wantsToSendEmail = emailIntentPatterns.some(pattern => pattern.test(lowerQuestion));
+
+    // If user wants to send email, do it directly without asking AI
+    if (wantsToSendEmail && areaInfo?.level === 'live-property') {
+      try {
+        setIsLoading(true);
+        
+        // Extract offer price from user's message or conversation history
+        let offerPrice = null;
+        
+        // Try to extract from current message first
+        const pricePatterns = [
+          /£([\d,]+(?:\.\d+)?)\s*(?:million|m)?/gi,
+          /(\d+(?:\.\d+)?)\s*(?:million|m)/gi,
+          /(\d{6,})/g  // 6+ digits for full price
+        ];
+        
+        for (const pattern of pricePatterns) {
+          const match = question.match(pattern);
+          if (match) {
+            let extracted = match[0];
+            // Parse the price
+            if (extracted.includes('million') || extracted.includes('m')) {
+              const numMatch = extracted.match(/([\d.]+)/);
+              if (numMatch) {
+                offerPrice = parseFloat(numMatch[1]) * 1000000;
+              }
+            } else if (extracted.includes('£')) {
+              const numMatch = extracted.match(/£([\d,]+)/);
+              if (numMatch) {
+                offerPrice = parseFloat(numMatch[1].replace(/,/g, ''));
+              }
+            } else if (/^\d{6,}$/.test(extracted)) {
+              offerPrice = parseInt(extracted);
+            }
+            if (offerPrice) break;
+          }
+        }
+        
+        // If no price found in current message, look in recent AI suggestions
+        if (!offerPrice) {
+          const recentMessages = messages.slice(-3).filter(m => m.role === 'assistant');
+          for (const msg of recentMessages) {
+            const suggestedMatch = msg.content.match(/suggest(?:ed)?\s+(?:opening\s+)?offer[:\s]+£([\d,]+)/i);
+            if (suggestedMatch) {
+              offerPrice = parseFloat(suggestedMatch[1].replace(/,/g, ''));
+              break;
+            }
+          }
+        }
+        
+        // If still no offer price and user mentions "ask price" or "asking price", use listed price
+        if (!offerPrice && (lowerQuestion.includes('ask price') || lowerQuestion.includes('asking price'))) {
+          offerPrice = areaInfo.median;
+        }
+
+        const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:3002';
+        const emailResponse = await fetch(`${apiUrl}/api/send-quote`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            propertyInfo: {
+              name: areaInfo.name,
+              price: areaInfo.median,
+              bedrooms: areaInfo.bedrooms,
+              bathrooms: areaInfo.bathrooms,
+              propertySize: areaInfo.propertySize,
+              sizeMetric: areaInfo.sizeMetric,
+              listingUrl: areaInfo.listingUrl
+            },
+            aiResponse: messages.slice(-2).filter(m => m.role === 'assistant')[0]?.content || '',
+            userQuestion: question,
+            offerPrice: offerPrice
+          })
+        });
+
+        if (emailResponse.ok) {
+          setMessages(prev => [...prev, {
+            role: 'assistant',
+            content: `✅ **Email sent successfully!** ${offerPrice ? `Your ${offerPrice === areaInfo.median ? 'offer at asking price of' : 'offer of'} £${offerPrice.toLocaleString()} has` : 'Your property inquiry has'} been sent to the seller with CC to your addresses.`,
+          }]);
+        } else {
+          const errorData = await emailResponse.json();
+          setMessages(prev => [...prev, {
+            role: 'assistant',
+            content: `❌ Failed to send email: ${errorData.error}`,
+            error: true
+          }]);
+        }
+      } catch (emailError) {
+        console.error('Email send error:', emailError);
+        setMessages(prev => [...prev, {
+          role: 'assistant',
+          content: '❌ Could not send email. Please check if the backend server is running.',
+          error: true
+        }]);
+      } finally {
+        setIsLoading(false);
+      }
+      return;
+    }
 
     try {
       const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:3002';
@@ -469,6 +587,7 @@ Context: ${areaInfo.median ? `Current median price: £${areaInfo.median?.toLocal
           </button>
         </div>
       </form>
+
     </div>
   );
 };
