@@ -1,5 +1,5 @@
 /**
- * Process 2018-2024 Sales Data with Coordinates
+ * Process 2018-2030 Sales + Prediction Data with Coordinates
  * Efficiently processes all years and creates monthly samples
  */
 
@@ -10,6 +10,37 @@ import readline from 'readline';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
+
+const parseCsvLine = (line) => {
+  const result = [];
+  let current = '';
+  let inQuotes = false;
+
+  for (let i = 0; i < line.length; i += 1) {
+    const char = line[i];
+
+    if (char === '"') {
+      if (inQuotes && line[i + 1] === '"') {
+        current += '"';
+        i += 1;
+      } else {
+        inQuotes = !inQuotes;
+      }
+      continue;
+    }
+
+    if (char === ',' && !inQuotes) {
+      result.push(current);
+      current = '';
+      continue;
+    }
+
+    current += char;
+  }
+
+  result.push(current);
+  return result;
+};
 
 // Ordnance Survey National Grid to Lat/Lng conversion
 function OSGridToLatLng(easting, northing) {
@@ -106,14 +137,28 @@ for (const file of csvFiles) {
 console.log(`✓ Loaded ${postcodeMap.size.toLocaleString()} postcodes`);
 
 // Process each year
-const YEARS = [2018, 2019, 2020, 2021, 2022, 2023, 2024];
+const YEARS = [2018, 2019, 2020, 2021, 2022, 2023, 2024, 2025, 2026, 2027, 2028, 2029, 2030];
 const SAMPLES_PER_MONTH = 3000; // Keep consistent sampling
 const allMonthlyData = {};
 
+const getCsvInfo = (year) => {
+  const historicalPath = path.join(__dirname, `../${year}.csv`);
+  if (fs.existsSync(historicalPath)) {
+    return { path: historicalPath, isPrediction: false };
+  }
+
+  const predictionPath = path.join(__dirname, `../bulk_property_predictions_${year}.csv`);
+  if (fs.existsSync(predictionPath)) {
+    return { path: predictionPath, isPrediction: true };
+  }
+
+  return null;
+};
+
 for (const year of YEARS) {
-  const csvPath = path.join(__dirname, `../${year}.csv`);
-  
-  if (!fs.existsSync(csvPath)) {
+  const csvInfo = getCsvInfo(year);
+
+  if (!csvInfo) {
     console.log(`⚠️  Skipping ${year} - file not found`);
     continue;
   }
@@ -123,12 +168,89 @@ for (const year of YEARS) {
   let processed = 0;
   let geocoded = 0;
 
-  const fileStream = fs.createReadStream(csvPath);
+  const fileStream = fs.createReadStream(csvInfo.path);
   const rl = readline.createInterface({ input: fileStream });
+  let headerFields = null;
+  let headerBuffer = null;
 
   for await (const line of rl) {
     if (!line.trim()) continue;
     processed++;
+
+    if (csvInfo.isPrediction) {
+      if (!headerFields) {
+        if (headerBuffer) {
+          const headerLine = `${headerBuffer}${line}`;
+          headerBuffer = null;
+          const headerParts = parseCsvLine(headerLine).map((value) => value.replace(/"/g, '').trim());
+          if (headerParts.includes('predicted_price') && headerParts.includes('postcode')) {
+            headerFields = headerParts;
+            continue;
+          }
+        }
+
+        if (line.startsWith('transaction_id') && !line.includes('predicted_price')) {
+          headerBuffer = line;
+          continue;
+        }
+
+        const headerParts = parseCsvLine(line).map((value) => value.replace(/"/g, '').trim());
+        if (headerParts.includes('predicted_price') && headerParts.includes('postcode')) {
+          headerFields = headerParts;
+          continue;
+        }
+      }
+
+      if (!headerFields) continue;
+
+      const parts = parseCsvLine(line);
+      const getField = (name) => {
+        const index = headerFields.indexOf(name);
+        return index >= 0 ? (parts[index] || '').replace(/"/g, '').trim() : '';
+      };
+
+      const priceRaw = getField('predicted_price') || getField('price');
+      const dateRaw = getField('date_of_transfer');
+      const yearRaw = getField('year');
+      const postcode = getField('postcode');
+      const propType = getField('property_type');
+
+      if (!postcode || !propType || !priceRaw || !dateRaw) continue;
+
+      let date = dateRaw.split(' ')[0];
+      if (yearRaw && date.includes('-')) {
+        const [_, month, day] = date.split('-');
+        date = `${yearRaw}-${month}-${day}`;
+      }
+
+      const price = parseFloat(priceRaw);
+      if (!Number.isFinite(price)) continue;
+
+      if (price < 1000 || price > 100000000) continue;
+
+      const coords = postcodeMap.get(postcode);
+      if (!coords) continue;
+
+      geocoded++;
+      const month = date.substring(0, 7); // "YYYY-MM"
+
+      if (!yearData[month]) yearData[month] = [];
+      yearData[month].push({
+        price,
+        date,
+        postcode,
+        propType,
+        lat: coords.lat,
+        lng: coords.lng,
+        district: postcode.split(' ')[0]
+      });
+
+      if (processed % 50000 === 0) {
+        process.stdout.write(`\r   Processed: ${processed.toLocaleString()} | Geocoded: ${geocoded.toLocaleString()}`);
+      }
+
+      continue;
+    }
 
     const match = line.match(/^\{[^}]+\},(\d+),(\d{4}-\d{2}-\d{2})[^,]*,"([^"]+)","([^"]+)"/);
     if (!match) continue;
@@ -174,7 +296,7 @@ for (const year of YEARS) {
 }
 
 // Save combined data
-const outputPath = path.join(__dirname, '../public/outputs/sales_2018_2024_monthly.json');
+const outputPath = path.join(__dirname, '../public/outputs/sales_2018_2030_monthly.json');
 const outputDir = path.dirname(outputPath);
 if (!fs.existsSync(outputDir)) {
   fs.mkdirSync(outputDir, { recursive: true });
@@ -199,4 +321,4 @@ console.log('✅ PROCESSING COMPLETE!');
 console.log(`\n📁 Output: ${sizeMB} MB`);
 console.log(`📅 Months: ${output.meta.totalMonths}`);
 console.log(`📊 Samples: ${output.meta.totalSamples.toLocaleString()}`);
-console.log(`\n💾 File: public/outputs/sales_2018_2024_monthly.json`);
+console.log(`\n💾 File: public/outputs/sales_2018_2030_monthly.json`);

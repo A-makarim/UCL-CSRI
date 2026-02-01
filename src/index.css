@@ -15,6 +15,14 @@ body {
   overflow: hidden;
 }
 
+/* Hide Mapbox logo and attribution */
+.mapboxgl-ctrl-logo,
+.mapboxgl-ctrl-attrib,
+.mapboxgl-ctrl-bottom-left,
+.mapboxgl-ctrl-bottom-right {
+  display: none !important;
+}
+
 /* Glassmorphic styling */
 .glass-panel {
   background: rgba(0, 0, 0, 0.7);
@@ -23,22 +31,22 @@ body {
   border: 1px solid rgba(255, 255, 255, 0.1);
 }
 
-/* Scrollbar styling */
+/* Scrollbar styling - gray theme */
 ::-webkit-scrollbar {
-  width: 8px;
+  width: 6px;
 }
 
 ::-webkit-scrollbar-track {
-  background: rgba(0, 0, 0, 0.3);
+  background: transparent;
 }
 
 ::-webkit-scrollbar-thumb {
-  background: rgba(0, 243, 255, 0.5);
-  border-radius: 4px;
+  background: rgba(100, 100, 100, 0.4);
+  border-radius: 3px;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: rgba(0, 243, 255, 0.8);
+  background: rgba(120, 120, 120, 0.6);
 }
 
 /* Mapbox container */
@@ -69,11 +77,12 @@ body {
   background: rgba(0, 0, 0, 0.95) !important;
   backdrop-filter: blur(20px);
   -webkit-backdrop-filter: blur(20px);
-  border: 1px solid rgba(0, 243, 255, 0.3);
-  border-radius: 12px;
-  padding: 16px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 8px;
+  padding: 8px;
   color: white;
-  box-shadow: 0 0 20px rgba(0, 243, 255, 0.3), 0 8px 32px rgba(0, 0, 0, 0.8);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
+  font-size: 9px;
 }
 
 .mapboxgl-popup-anchor-bottom .mapboxgl-popup-tip {

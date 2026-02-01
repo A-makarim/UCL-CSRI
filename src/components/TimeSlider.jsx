@@ -77,7 +77,7 @@ const TimeSlider = ({ activeMonth, onMonthChange, minMonth = 1, maxMonth = 84, s
   useEffect(() => {
     if (!isPlaying) return;
 
-    const monthsPerSecond = 1.4; // tune feel here
+    const monthsPerSecond = 4.2; // tune feel here (3x faster)
 
     // Start from current position
     playValue.current = activeMonthRef.current;
