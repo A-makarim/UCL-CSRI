@@ -49,6 +49,49 @@ body {
   background: rgba(120, 120, 120, 0.6);
 }
 
+/* Custom slider styling to match website theme */
+.slider-thumb {
+  -webkit-appearance: none;
+}
+
+.slider-thumb::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.9);
+  cursor: pointer;
+  border: 2px solid rgba(0, 243, 255, 0.4);
+  box-shadow: 0 0 8px rgba(0, 243, 255, 0.3);
+  transition: all 0.2s ease;
+}
+
+.slider-thumb::-webkit-slider-thumb:hover {
+  background: rgba(0, 243, 255, 0.95);
+  border-color: rgba(0, 243, 255, 0.8);
+  box-shadow: 0 0 12px rgba(0, 243, 255, 0.6);
+  transform: scale(1.1);
+}
+
+.slider-thumb::-moz-range-thumb {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.9);
+  cursor: pointer;
+  border: 2px solid rgba(0, 243, 255, 0.4);
+  box-shadow: 0 0 8px rgba(0, 243, 255, 0.3);
+  transition: all 0.2s ease;
+}
+
+.slider-thumb::-moz-range-thumb:hover {
+  background: rgba(0, 243, 255, 0.95);
+  border-color: rgba(0, 243, 255, 0.8);
+  box-shadow: 0 0 12px rgba(0, 243, 255, 0.6);
+  transform: scale(1.1);
+}
+
 /* Mapbox container */
 .mapboxgl-canvas {
   outline: none;

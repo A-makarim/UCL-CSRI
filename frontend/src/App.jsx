@@ -42,6 +42,33 @@ function App() {
   const [liveListings, setLiveListings] = useState(null);
   const [livePointsData, setLivePointsData] = useState(null);
 
+  // Filter states
+  const [priceRange, setPriceRange] = useState([0, 5000000]);
+  const [bedroomRange, setBedroomRange] = useState([0, 10]);
+
+  // Filter function to apply price and bedroom filters
+  const filterGeoData = (data) => {
+    if (!data || !data.features) return data;
+    
+    return {
+      ...data,
+      features: data.features.filter(feature => {
+        const price = feature.properties.price || feature.properties.value || 0;
+        const bedrooms = feature.properties.bedrooms || 0;
+        
+        // Apply price filter
+        if (price < priceRange[0] || price > priceRange[1]) return false;
+        
+        // Apply bedroom filter (only for live properties that have bedroom data)
+        if (propertyMode === 'live' && feature.properties.bedrooms !== undefined) {
+          if (bedrooms < bedroomRange[0] || bedrooms > bedroomRange[1]) return false;
+        }
+        
+        return true;
+      })
+    };
+  };
+
   const polygonLevels = {
     area: { dir: 'area_geojson', prefix: 'area', label: 'Area' },
     district: { dir: 'district_geojson', prefix: 'district', label: 'District' },
@@ -91,10 +118,17 @@ function App() {
         setSalesData2025(data);
 
         // Pre-sample a fixed number of points per month for smooth playback
-        const SAMPLE_PER_MONTH = 4000;
+        const SAMPLE_PER_MONTH = 8000;
         const samples = {};
+        
+        const randomSample = (arr, count) => {
+          if (arr.length <= count) return arr;
+          const shuffled = [...arr].sort(() => Math.random() - 0.5);
+          return shuffled.slice(0, count);
+        };
+        
         Object.keys(data.months).forEach((monthKey) => {
-          samples[monthKey] = data.months[monthKey].slice(0, SAMPLE_PER_MONTH);
+          samples[monthKey] = randomSample(data.months[monthKey], SAMPLE_PER_MONTH);
         });
         setMonthSamples(samples);
 
@@ -317,24 +351,18 @@ function App() {
       return picked;
     };
     if (renderMode === 'points') {
-      // Year-based points blending
-      const baseYear = START_YEAR + Math.floor((baseMonthInt - 1) / 12);
-      const nextYear = Math.min(END_YEAR, baseYear + 1);
+      // Use actual month data for points, not just January
+      const currentSales = monthSamples[baseKey] || [];
+      const nextSales = monthSamples[nextKey] || [];
       
-      const currentYearKey = `${baseYear}-01`;
-      const nextYearKey = `${nextYear}-01`;
-      
-      const currentYearSales = monthSamples[currentYearKey] || [];
-      const nextYearSales = monthSamples[nextYearKey] || [];
-      
-      const currentSampled = pickRandom(currentYearSales, 2000);
-      const nextSampled = pickRandom(nextYearSales, 2000);
+      const currentSampled = pickRandom(currentSales, 3000);
+      const nextSampled = pickRandom(nextSales, 3000);
       
       setPointsData({
         type: 'FeatureCollection',
         features: [
-          ...buildFeatures(currentSampled, 0, currentYearKey),
-          ...buildFeatures(nextSampled, 1, nextYearKey)
+          ...buildFeatures(currentSampled, 0, baseKey),
+          ...buildFeatures(nextSampled, 1, nextKey)
         ]
       });
     } else if (renderMode === 'continuous') {
@@ -626,6 +654,60 @@ function App() {
 
   return (
     <div className="relative w-full h-screen bg-black overflow-hidden">
+      {/* Filter Bar - Top */}
+      <div className="absolute top-4 right-4 z-20 glass-panel rounded-2xl px-4 py-3 shadow-2xl" style={{ width: '360px' }}>
+        <div className="space-y-4">
+          {/* Price Range Filter */}
+          <div>
+            <div className="flex justify-between items-center mb-2">
+              <span className="text-[10px] uppercase tracking-[0.3em] text-white/40">Max Price</span>
+              <span className="text-xs text-white/60">
+                £{priceRange[1] >= 5000000 ? '5M+' : (priceRange[1] / 1000).toFixed(0) + 'k'}
+              </span>
+            </div>
+            <input
+              type="range"
+              min="100000"
+              max="5000000"
+              step="50000"
+              value={priceRange[1]}
+              onChange={(e) => setPriceRange([0, Number(e.target.value)])}
+              className="w-full h-1.5 bg-white/5 rounded-lg appearance-none cursor-pointer slider-thumb"
+            />
+          </div>
+
+          {/* Bedroom Range Filter */}
+          <div>
+            <div className="flex justify-between items-center mb-2">
+              <span className="text-[10px] uppercase tracking-[0.3em] text-white/40">Max Bedrooms</span>
+              <span className="text-xs text-white/60">
+                {bedroomRange[1] >= 10 ? '10+' : bedroomRange[1]}
+              </span>
+            </div>
+            <input
+              type="range"
+              min="1"
+              max="10"
+              step="1"
+              value={bedroomRange[1]}
+              onChange={(e) => setBedroomRange([0, Number(e.target.value)])}
+              className="w-full h-1.5 bg-white/5 rounded-lg appearance-none cursor-pointer slider-thumb"
+            />
+          </div>
+
+          {/* Reset Button */}
+          <button
+            onClick={() => {
+              setPriceRange([0, 5000000]);
+              setBedroomRange([0, 10]);
+            }}
+            className="w-full rounded-full bg-white/5 px-3 py-1.5 text-xs text-white/60 hover:bg-white/10 hover:text-white transition"
+          >
+            Reset Filters
+          </button>
+        </div>
+      </div>
+
       <div className="absolute top-4 left-4 z-20">
         <div className="glass-panel rounded-2xl px-3 py-3 text-xs text-white/80 shadow-2xl">
           <div className="mb-2 text-[10px] uppercase tracking-[0.3em] text-white/40">
@@ -741,8 +823,8 @@ function App() {
         </div>
       </div>
       <MapEngine
-        geoData={propertyMode === 'live' ? livePointsData : geoData}
-        pointsData={propertyMode === 'live' ? livePointsData : pointsData}
+        geoData={propertyMode === 'live' ? filterGeoData(livePointsData) : filterGeoData(geoData)}
+        pointsData={propertyMode === 'live' ? filterGeoData(livePointsData) : filterGeoData(pointsData)}
         selectedVariable="price"
         activeMonth={activeMonth}
         blend={monthBlend}
