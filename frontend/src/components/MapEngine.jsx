@@ -51,11 +51,13 @@ const MapEngine = ({
         ['linear'],
         ['heatmap-density'],
         0, 'rgba(0, 0, 0, 0)',
-        0.2, 'rgba(0, 100, 255, 0.5)',
-        0.4, 'rgba(0, 150, 255, 0.6)',
-        0.6, 'rgba(0, 200, 255, 0.7)',
-        0.8, 'rgba(0, 243, 255, 0.8)',
-        1, 'rgba(0, 243, 255, 1)'
+        0.15, 'rgba(0, 50, 255, 0.4)',      // Deep Blue
+        0.3, 'rgba(0, 150, 255, 0.55)',    // Cyan
+        0.45, 'rgba(0, 255, 200, 0.65)',   // Turquoise
+        0.6, 'rgba(50, 255, 100, 0.75)',   // Green
+        0.75, 'rgba(255, 255, 0, 0.85)',   // Yellow
+        0.88, 'rgba(255, 150, 0, 0.92)',   // Orange
+        1, 'rgba(255, 50, 0, 1)'           // Red
       ]
     },
     rental_yield: {
@@ -586,12 +588,13 @@ const MapEngine = ({
         'interpolate',
         ['linear'],
         ['coalesce', ['get', 'median_price'], 0],
-        200000, 'rgb(24, 75, 125)',
-        350000, 'rgb(33, 146, 175)',
-        500000, 'rgb(84, 213, 178)',
-        650000, 'rgb(182, 229, 121)',
-        800000, 'rgb(255, 196, 111)',
-        1000000, 'rgb(255, 120, 90)'
+        250000, 'rgb(0, 60, 200)',        // Deep Blue - cheapest
+        350000, 'rgb(0, 150, 255)',       // Bright Blue
+        450000, 'rgb(0, 255, 200)',       // Cyan
+        550000, 'rgb(100, 255, 100)',     // Green
+        650000, 'rgb(255, 255, 0)',       // Yellow
+        750000, 'rgb(255, 150, 0)',       // Orange
+        900000, 'rgb(255, 50, 0)'         // Red - most expensive
       ]
     };
 
@@ -638,10 +641,12 @@ const MapEngine = ({
             'interpolate',
             ['linear'],
             ['coalesce', ['get', 'median_price'], 0],
-            200000, 'rgba(33, 146, 175, 0.7)',
-            500000, 'rgba(84, 213, 178, 0.8)',
-            800000, 'rgba(255, 196, 111, 0.9)',
-            1000000, 'rgba(255, 120, 90, 0.95)'
+            250000, 'rgba(0, 80, 255, 0.7)',      // Blue
+            400000, 'rgba(0, 200, 255, 0.75)',    // Cyan
+            550000, 'rgba(100, 255, 100, 0.8)',   // Green
+            650000, 'rgba(255, 255, 0, 0.85)',    // Yellow
+            750000, 'rgba(255, 150, 0, 0.9)',     // Orange
+            900000, 'rgba(255, 50, 0, 0.95)'      // Red
           ],
           'circle-stroke-width': 1,
           'circle-stroke-color': 'rgba(10, 15, 20, 0.7)',
