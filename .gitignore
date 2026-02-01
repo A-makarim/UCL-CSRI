@@ -1,0 +1,6 @@
+hackathon_env
+*.csv
+sale_history_data.json
+scrape.bat
+scrape.py
+get_sample_data.py
