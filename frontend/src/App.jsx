@@ -251,6 +251,7 @@ function App() {
     if (!monthSamples || !salesData2025) return;
 
     const baseKey = getMonthKey(baseMonth);
+    const nextMonth = Math.min(TOTAL_MONTHS, baseMonth + 1);
     const nextKey = getMonthKey(nextMonth);
     const baseSales = monthSamples[baseKey] || [];
     const nextSales = monthSamples[nextKey] || [];
