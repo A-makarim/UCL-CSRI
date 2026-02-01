@@ -211,7 +211,7 @@ Context: ${areaInfo.median ? `Current median price: £${areaInfo.median?.toLocal
           } else {
             setMessages(prev => [...prev, {
               role: 'assistant',
-              content: 'I could not extract any images for this listing. Please try another property.'
+              content: 'No pics of this property found. The listing may not have images available, or they may be protected from scraping.'
             }]);
           }
         } catch (error) {
@@ -219,7 +219,7 @@ Context: ${areaInfo.median ? `Current median price: £${areaInfo.median?.toLocal
           setMessages(prev => prev.filter(m => !m.loading));
           setMessages(prev => [...prev, {
             role: 'assistant',
-            content: 'Image download failed. Please try another property or try again in a moment.'
+            content: 'Could not fetch images. The listing might be temporarily unavailable.'
           }]);
         }
 

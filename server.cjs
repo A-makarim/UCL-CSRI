@@ -40,14 +40,28 @@ app.post('/api/scrape-images', async (req, res) => {
     const imageUrls = [];
     
     // Zoopla stores images in various places, try multiple selectors
-    $('img[src*="zoopla"], img[data-src*="zoopla"], picture source[srcset*="zoopla"]').each((i, el) => {
-      const src = $(el).attr('src') || $(el).attr('data-src') || $(el).attr('srcset');
-      if (src && src.includes('zoopla') && !src.includes('logo') && !src.includes('icon')) {
+    // Look for ANY image on the page (more aggressive approach)
+    $('img, picture source').each((i, el) => {
+      const src = $(el).attr('src') || $(el).attr('data-src') || $(el).attr('srcset') || $(el).attr('data-lazy');
+      if (src && !src.includes('logo') && !src.includes('icon') && !src.includes('avatar') && !src.includes('placeholder')) {
         // Get highest quality version
         let cleanUrl = src.split(',')[0].split(' ')[0];
-        // Replace size parameters to get high-res version
-        cleanUrl = cleanUrl.replace(/\/\d+x\d+\//, '/1024x768/');
+        // Replace size parameters to get high-res version if it's a Zoopla image
+        if (cleanUrl.includes('zoopla')) {
+          cleanUrl = cleanUrl.replace(/\/\d+x\d+\//, '/1024x768/');
+        }
         if (!imageUrls.includes(cleanUrl) && cleanUrl.startsWith('http')) {
+          imageUrls.push(cleanUrl);
+        }
+      }
+    });
+    
+    // Also look for data attributes commonly used for lazy loading
+    $('[data-srcset], [data-lazy-src]').each((i, el) => {
+      const src = $(el).attr('data-srcset') || $(el).attr('data-lazy-src');
+      if (src && !src.includes('logo')) {
+        const cleanUrl = src.split(',')[0].split(' ')[0];
+        if (cleanUrl.startsWith('http') && !imageUrls.includes(cleanUrl)) {
           imageUrls.push(cleanUrl);
         }
       }
