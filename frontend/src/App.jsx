@@ -53,6 +53,7 @@ function App() {
   const [pointData, setPointData] = useState(null);
   const [isUpdating, setIsUpdating] = useState(false);
   const [polygonRanges, setPolygonRanges] = useState(null);
+  const [agentRequest, setAgentRequest] = useState(null);
 
   const [targetLocation, setTargetLocation] = useState({
     center: [-0.1276, 51.5074],
@@ -222,6 +223,9 @@ function App() {
         showHeatmap={showHeatmap}
         onMapLoad={setMapInstance}
         onUpdateStateChange={setIsUpdating}
+        onRequestAgentSummary={(payload) =>
+          setAgentRequest({ id: `${Date.now()}-${Math.random()}`, ...payload })
+        }
       />
       {months.length > 0 && (
         <BottomBar
@@ -250,6 +254,7 @@ function App() {
           showDots,
           showHeatmap
         }}
+        request={agentRequest}
       />
       {loading && (
         <div className="absolute top-4 left-4 text-xs text-white/50">

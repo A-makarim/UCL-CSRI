@@ -1,13 +1,48 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { askAgent } from '../services/localData';
 
-const AgentPanel = ({ context }) => {
+const AgentPanel = ({ context, request }) => {
   const [open, setOpen] = useState(false);
   const [input, setInput] = useState('');
   const [messages, setMessages] = useState([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const listRef = useRef(null);
+  const lastRequestRef = useRef(null);
+  const messagesRef = useRef([]);
+
+  const formatPrice = (value) => {
+    const numeric = Number(value);
+    if (!Number.isFinite(numeric)) return 'N/A';
+    if (numeric >= 1_000_000) return `£${(numeric / 1_000_000).toFixed(2)}M`;
+    if (numeric >= 1_000) return `£${Math.round(numeric / 1_000)}K`;
+    return `£${Math.round(numeric).toLocaleString()}`;
+  };
+
+  const formatCount = (value) => {
+    const numeric = Number(value);
+    return Number.isFinite(numeric) ? numeric : 'N/A';
+  };
+
+  const sanitizeHistory = (history) => {
+    const cleaned = [];
+    for (const item of history || []) {
+      const role = item?.role;
+      const content = item?.content;
+      if (!content || (role !== 'user' && role !== 'assistant')) continue;
+      const lastRole = cleaned[cleaned.length - 1]?.role;
+      if (role === lastRole) continue;
+      cleaned.push({ role, content });
+    }
+    if (cleaned.length && cleaned[cleaned.length - 1].role === 'user') {
+      cleaned.pop();
+    }
+    return cleaned.slice(-10);
+  };
+
+  useEffect(() => {
+    messagesRef.current = messages;
+  }, [messages]);
 
   useEffect(() => {
     if (!listRef.current) return;
@@ -24,19 +59,52 @@ const AgentPanel = ({ context }) => {
     setError('');
 
     try {
+      const history = sanitizeHistory(messagesRef.current);
       const response = await askAgent({
         message: trimmed,
-        history: nextMessages,
+        history,
         context
       });
       const answer = response?.answer || 'No response.';
       setMessages((prev) => [...prev, { role: 'assistant', content: answer }]);
     } catch (err) {
-      setError('Failed to reach the agent. Check PERPLEXITY_API_KEY.');
+      setError(err?.message || 'Failed to reach the agent. Check PERPLEXITY_API_KEY.');
     } finally {
       setLoading(false);
     }
   };
+
+  useEffect(() => {
+    if (!request || request.id === lastRequestRef.current) return;
+    lastRequestRef.current = request.id;
+
+    const title = request.title || request.code || 'Area';
+    const month = request.month ? ` (${request.month})` : '';
+    const prompt = `Give a detailed but concise summary about ${title}${month}. Median: ${formatPrice(
+      request.median_price
+    )}, mean: ${formatPrice(request.mean_price)}, sales: ${formatCount(
+      request.sales
+    )}. Highlight strengths and weaknesses (transport, schools, amenities, safety, affordability, demand). Use current public info and cite sources if available.`;
+
+    setOpen(true);
+    setMessages((prev) => [...prev, { role: 'user', content: prompt }]);
+    setLoading(true);
+    setError('');
+
+    const history = sanitizeHistory(messagesRef.current);
+
+    askAgent({ message: prompt, history, context: null })
+      .then((response) => {
+        const answer = response?.answer || 'No response.';
+        setMessages((prev) => [...prev, { role: 'assistant', content: answer }]);
+      })
+      .catch((err) => {
+        setError(err?.message || 'Failed to reach the agent. Check PERPLEXITY_API_KEY.');
+      })
+      .finally(() => {
+        setLoading(false);
+      });
+  }, [request]);
 
   const handleKeyDown = (event) => {
     if (event.key === 'Enter' && !event.shiftKey) {
