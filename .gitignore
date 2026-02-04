@@ -13,13 +13,13 @@ dist/
 .vscode/
 *.locS
 growth_test.txt
+codepo_gb/
 
-backend/
 data/
 codepo_gb/
 gb-postcodes/
 gb-postcodes-*.tar.*
-gb-postcodes-v5.tar.bz2
+gb-postcodes-v5
 yearsold.csv
 outputs/
 *.csv
@@ -31,4 +31,11 @@ PPD/
 *.tar.gz
 *.tar.bz2
 
+predictions/
+
 /UCL-CSRI-thirddraft
+
+# Local live snapshots (ScanSan listings, geocoding caches, etc.)
+live/
+
+codepo_gb/

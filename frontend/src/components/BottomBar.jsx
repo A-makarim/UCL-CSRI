@@ -32,7 +32,9 @@ const BottomBar = ({
   showDots,
   onToggleDots,
   showHeatmap,
-  onToggleHeatmap
+  onToggleHeatmap,
+  showLive,
+  onToggleLive
 }) => (
   <div className="absolute bottom-0 left-0 right-0 px-6 pb-6">
     <div className="rounded-2xl border border-white/10 bg-black/60 p-4 backdrop-blur-md">
@@ -57,6 +59,9 @@ const BottomBar = ({
           </ToggleButton>
           <ToggleButton active={showHeatmap} onClick={onToggleHeatmap}>
             Smooth Dots
+          </ToggleButton>
+          <ToggleButton active={showLive} onClick={onToggleLive}>
+            Live
           </ToggleButton>
         </div>
       </div>

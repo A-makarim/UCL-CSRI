@@ -80,11 +80,24 @@ const AgentPanel = ({ context, request }) => {
 
     const title = request.title || request.code || 'Area';
     const month = request.month ? ` (${request.month})` : '';
-    const prompt = `Give a detailed but concise summary about ${title}${month}. Median: ${formatPrice(
-      request.median_price
-    )}, mean: ${formatPrice(request.mean_price)}, sales: ${formatCount(
-      request.sales
-    )}. Highlight strengths and weaknesses (transport, schools, amenities, safety, affordability, demand). Use current public info and cite sources if available.`;
+
+    let prompt = '';
+    if (request.selectionType === 'live') {
+      const kind = request.kind === 'rent' ? 'rental' : 'for sale';
+      prompt =
+        `Give a detailed but concise analysis of this live listing (${kind}) in ${title}. ` +
+        `Price: ${formatPrice(request.price)}. ` +
+        `${request.bedrooms ? `Bedrooms: ${request.bedrooms}. ` : ''}` +
+        `Comment on what stands out, likely target buyer/tenant, and key risks. ` +
+        `Then give a short area-level view: what's attractive and what's not (transport, schools, amenities, safety, demand). ` +
+        `Use current public info and cite sources if available.`;
+    } else {
+      prompt = `Give a detailed but concise summary about ${title}${month}. Median: ${formatPrice(
+        request.median_price
+      )}, mean: ${formatPrice(request.mean_price)}, sales: ${formatCount(
+        request.sales
+      )}. Highlight strengths and weaknesses (transport, schools, amenities, safety, affordability, demand). Use current public info and cite sources if available.`;
+    }
 
     setOpen(true);
     setMessages((prev) => [...prev, { role: 'user', content: prompt }]);
@@ -92,8 +105,9 @@ const AgentPanel = ({ context, request }) => {
     setError('');
 
     const history = sanitizeHistory(messagesRef.current);
+    const ctx = request?.context || context;
 
-    askAgent({ message: prompt, history, context: null })
+    askAgent({ message: prompt, history, context: ctx })
       .then((response) => {
         const answer = response?.answer || 'No response.';
         setMessages((prev) => [...prev, { role: 'assistant', content: answer }]);

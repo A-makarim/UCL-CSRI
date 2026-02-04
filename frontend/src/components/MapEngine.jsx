@@ -6,7 +6,7 @@
 
 import React, { useEffect, useRef, useState } from 'react';
 import mapboxgl from 'mapbox-gl';
-import { fetchTransactions } from '../services/localData';
+import { fetchLiveListing, fetchLiveListings, fetchTransactions } from '../services/localData';
 
 mapboxgl.accessToken = import.meta.env.VITE_MAPBOX_TOKEN;
 
@@ -75,9 +75,11 @@ const MapEngine = ({
   polygonIdKey,
   activeMonth,
   pointData,
+  liveData,
   showPolygons,
   showDots,
   showHeatmap,
+  showLive,
   onMapLoad,
   onUpdateStateChange,
   onRequestAgentSummary
@@ -88,6 +90,7 @@ const MapEngine = ({
   const hoverPopupRef = useRef(null);
   const clickPopupRef = useRef(null);
   const listenersAttachedRef = useRef(false);
+  const liveListenersAttachedRef = useRef(false);
   const polygonKeyRef = useRef(null);
   const activeMonthRef = useRef(activeMonth);
   const polygonModeRef = useRef(polygonIdKey);
@@ -157,6 +160,10 @@ const MapEngine = ({
     const pointSourceId = 'point-source';
     const heatmapLayerId = 'point-heatmap';
     const dotLayerId = 'point-dots';
+    const liveSourceId = 'live-source';
+    const liveClusterLayerId = 'live-clusters';
+    const liveClusterCountId = 'live-cluster-count';
+    const livePointLayerId = 'live-points';
 
     const range = polygonRange || { min: 0, max: 1 };
     const pointRange = getPointRange(pointData);
@@ -348,6 +355,94 @@ const MapEngine = ({
     mapInstance.setLayoutProperty(polygonFillId, 'visibility', showPolygons ? 'visible' : 'none');
     mapInstance.setLayoutProperty(polygonOutlineId, 'visibility', showPolygons ? 'visible' : 'none');
 
+    // Live listings overlay (separate from monthly PPD/predictions)
+    if (liveData) {
+      if (!mapInstance.getSource(liveSourceId)) {
+        mapInstance.addSource(liveSourceId, {
+          type: 'geojson',
+          data: liveData,
+          cluster: true,
+          clusterRadius: 55,
+          clusterMaxZoom: 12
+        });
+      } else {
+        mapInstance.getSource(liveSourceId).setData(liveData);
+      }
+
+      if (!mapInstance.getLayer(liveClusterLayerId)) {
+        mapInstance.addLayer({
+          id: liveClusterLayerId,
+          type: 'circle',
+          source: liveSourceId,
+          filter: ['has', 'point_count'],
+          paint: {
+            'circle-color': 'rgba(56, 189, 248, 0.35)',
+            'circle-stroke-color': 'rgba(56, 189, 248, 0.8)',
+            'circle-stroke-width': 1,
+            'circle-radius': [
+              'interpolate',
+              ['linear'],
+              ['get', 'point_count'],
+              10, 14,
+              100, 22,
+              500, 30,
+              1500, 40
+            ]
+          }
+        });
+      }
+
+      if (!mapInstance.getLayer(liveClusterCountId)) {
+        mapInstance.addLayer({
+          id: liveClusterCountId,
+          type: 'symbol',
+          source: liveSourceId,
+          filter: ['has', 'point_count'],
+          layout: {
+            'text-field': ['get', 'point_count_abbreviated'],
+            'text-font': ['DIN Offc Pro Medium', 'Arial Unicode MS Bold'],
+            'text-size': 12
+          },
+          paint: {
+            'text-color': 'rgba(255,255,255,0.9)'
+          }
+        });
+      }
+
+      if (!mapInstance.getLayer(livePointLayerId)) {
+        mapInstance.addLayer({
+          id: livePointLayerId,
+          type: 'circle',
+          source: liveSourceId,
+          filter: ['!', ['has', 'point_count']],
+          paint: {
+            'circle-radius': [
+              'interpolate',
+              ['linear'],
+              ['zoom'],
+              6, 2.5,
+              11, 4,
+              14, 7
+            ],
+            'circle-color': [
+              'match',
+              ['get', 'kind'],
+              'rent', 'rgba(251, 146, 60, 0.85)',
+              'rgba(56, 189, 248, 0.9)'
+            ],
+            'circle-opacity': 0.8,
+            'circle-blur': 0.15,
+            'circle-stroke-width': 0.6,
+            'circle-stroke-color': 'rgba(255,255,255,0.35)'
+          }
+        });
+      }
+
+      mapInstance.setLayoutProperty(liveClusterLayerId, 'visibility', showLive ? 'visible' : 'none');
+      mapInstance.setLayoutProperty(liveClusterCountId, 'visibility', showLive ? 'visible' : 'none');
+      mapInstance.setLayoutProperty(livePointLayerId, 'visibility', showLive ? 'visible' : 'none');
+    }
+
     if (!listenersAttachedRef.current) {
       if (!hoverPopupRef.current) {
         hoverPopupRef.current = new mapboxgl.Popup({ closeButton: false, closeOnClick: false, offset: 12 });
@@ -404,6 +499,51 @@ const MapEngine = ({
         return `
           <div class="popup-note">${escapeHtml(note)}</div>
           <div class="popup-list">${rows || '<div class="popup-empty">No transactions found.</div>'}</div>
+        `;
+      };
+
+      const buildNoTransactionsHtml = (reason) => {
+        const msg = reason || 'No transactions available.';
+        return `
+          <div class="popup-section">
+            <div class="popup-note">${escapeHtml(msg)}</div>
+          </div>
+        `;
+      };
+
+      const renderListingRow = (listing) => {
+        const kind = listing?._kind || listing?.kind || '';
+        const price = kind === 'rent'
+          ? formatPrice(Number(listing?.rent_pcm))
+          : formatPrice(Number(listing?.sale_price));
+        const beds = listing?.bedrooms ? `${listing.bedrooms} bd` : '';
+        const address = listing?.street_address || listing?.address || '';
+        const url = listing?.listing_url || listing?.url || '';
+        return `
+          <div class="popup-row">
+            <div class="popup-price">${escapeHtml(price)} ${beds ? `<span class="popup-tag">${escapeHtml(beds)}</span>` : ''}</div>
+            ${address ? `<div class="popup-meta">${escapeHtml(address)}</div>` : ''}
+            ${url ? `<div class="popup-address"><a href="${escapeHtml(url)}" target="_blank" rel="noreferrer">Open listing</a></div>` : ''}
+          </div>
+        `;
+      };
+
+      const buildLiveHtml = (payload) => {
+        const total = Number(payload?.total) || 0;
+        const shown = (payload?.listings || []).length;
+        const summary = payload?.summary || {};
+        const sale = summary.sale || {};
+        const rent = summary.rent || {};
+        const rows = (payload?.listings || []).map(renderListingRow).join('');
+        return `
+          <div class="popup-section">
+            <div class="popup-note">Live listings (${total} total, showing ${shown})</div>
+            <div class="popup-metrics">
+              <div>Sale median: ${formatPrice(Number(sale.median))}</div>
+              <div>Rent median: ${formatPrice(Number(rent.median))}</div>
+            </div>
+            <div class="popup-list">${rows || '<div class="popup-empty">No listings found.</div>'}</div>
+          </div>
         `;
       };
 
@@ -470,6 +610,53 @@ const MapEngine = ({
           return;
         }
 
+        // Predictions are model outputs; we do not have underlying Land Registry transactions to display.
+        if (month >= '2026-01') {
+          let html = `${summaryHtml}${buildNoTransactionsHtml(
+            'Predicted month: no underlying Land Registry transactions for this view.'
+          )}`;
+          if (showLive) {
+            try {
+              const livePayload = await fetchLiveListings({
+                mode: 'postcode',
+                code: postcode,
+                kind: 'all',
+                limit: 8
+              });
+              html += buildLiveHtml(livePayload);
+            } catch {
+              // ignore live failures
+            }
+          }
+          clickPopupRef.current.setHTML(html);
+          if (agentRequestRef.current) {
+            agentRequestRef.current({
+              selectionType: 'ppd',
+              title: postcode || 'Postcode',
+              mode: 'postcode',
+              code: postcode,
+              month,
+              median_price: Number(median_price),
+              mean_price: Number(mean_price),
+              sales: Number(sales),
+              context: {
+                selection: {
+                  type: 'postcode',
+                  title: postcode || 'Postcode',
+                  mode: 'postcode',
+                  code: postcode,
+                  month,
+                  median_price: Number(median_price),
+                  mean_price: Number(mean_price),
+                  sales: Number(sales)
+                }
+              }
+            });
+          }
+          return;
+        }
+
+        let livePayload = null;
         try {
           const details = await fetchTransactions({
             month,
@@ -478,9 +665,23 @@ const MapEngine = ({
             limit: 200
           });
           if (seq !== clickSeqRef.current) return;
-          clickPopupRef.current.setHTML(
-            `${summaryHtml}${buildTransactionsHtml(details, { totalOverride: Number(sales) })}`
-          );
+          let html = `${summaryHtml}${buildTransactionsHtml(details, { totalOverride: Number(sales) })}`;
+          if (showLive) {
+            try {
+              livePayload = await fetchLiveListings({
+                mode: 'postcode',
+                code: postcode,
+                kind: 'all',
+                limit: 8
+              });
+              if (seq === clickSeqRef.current) {
+                html += buildLiveHtml(livePayload);
+              }
+            } catch {
+              // ignore live failures
+            }
+          }
+          clickPopupRef.current.setHTML(html);
         } catch (error) {
           if (seq !== clickSeqRef.current) return;
           clickPopupRef.current.setHTML(
@@ -490,13 +691,27 @@ const MapEngine = ({
 
         if (agentRequestRef.current && month) {
           agentRequestRef.current({
+            selectionType: 'ppd',
             title: postcode || 'Postcode',
             mode: 'postcode',
             code: postcode,
             month,
             median_price: Number(median_price),
             mean_price: Number(mean_price),
-            sales: Number(sales)
+            sales: Number(sales),
+            context: {
+              selection: {
+                type: 'postcode',
+                title: postcode || 'Postcode',
+                mode: 'postcode',
+                code: postcode,
+                month,
+                median_price: Number(median_price),
+                mean_price: Number(mean_price),
+                sales: Number(sales)
+              },
+              live: livePayload
+            }
           });
         }
       };
@@ -529,6 +744,53 @@ const MapEngine = ({
           return;
         }
 
+        // Predictions are model outputs; we do not have underlying Land Registry transactions to display.
+        if (month >= '2026-01') {
+          let html = `${summaryHtml}${buildNoTransactionsHtml(
+            'Predicted month: no underlying Land Registry transactions for this view.'
+          )}`;
+          if (showLive) {
+            try {
+              const livePayload = await fetchLiveListings({
+                mode,
+                code: String(feature.id),
+                kind: 'all',
+                limit: 8
+              });
+              html += buildLiveHtml(livePayload);
+            } catch {
+              // ignore live failures
+            }
+          }
+          clickPopupRef.current.setHTML(html);
+          if (agentRequestRef.current) {
+            agentRequestRef.current({
+              selectionType: 'ppd',
+              title: label,
+              mode,
+              code: String(feature.id),
+              month,
+              median_price: median,
+              mean_price: meanPrice,
+              sales,
+              context: {
+                selection: {
+                  type: mode,
+                  title: label,
+                  mode,
+                  code: String(feature.id),
+                  month,
+                  median_price: median,
+                  mean_price: meanPrice,
+                  sales
+                }
+              }
+            });
+          }
+          return;
+        }
+
+        let livePayload = null;
         try {
           const details = await fetchTransactions({
             month,
@@ -538,7 +800,23 @@ const MapEngine = ({
           });
           if (seq !== clickSeqRef.current) return;
           transactionsHtml = buildTransactionsHtml(details, { totalOverride: sales });
-          clickPopupRef.current.setHTML(`${summaryHtml}${transactionsHtml}`);
+          let html = `${summaryHtml}${transactionsHtml}`;
+          if (showLive) {
+            try {
+              livePayload = await fetchLiveListings({
+                mode,
+                code: String(feature.id),
+                kind: 'all',
+                limit: 8
+              });
+              if (seq === clickSeqRef.current) {
+                html += buildLiveHtml(livePayload);
+              }
+            } catch {
+              // ignore live failures
+            }
+          }
+          clickPopupRef.current.setHTML(html);
         } catch (error) {
           if (seq !== clickSeqRef.current) return;
           transactionsHtml = '<div class="popup-empty">Failed to load transactions.</div>';
@@ -547,13 +825,27 @@ const MapEngine = ({
 
         if (agentRequestRef.current && month) {
           agentRequestRef.current({
+            selectionType: 'ppd',
             title: label,
             mode,
             code: String(feature.id),
             month,
             median_price: median,
             mean_price: meanPrice,
-            sales
+            sales,
+            context: {
+              selection: {
+                type: mode,
+                title: label,
+                mode,
+                code: String(feature.id),
+                month,
+                median_price: median,
+                mean_price: meanPrice,
+                sales
+              },
+              live: livePayload
+            }
           });
         }
       };
@@ -578,7 +870,241 @@ const MapEngine = ({
 
       listenersAttachedRef.current = true;
     }
-  }, [polygonData, polygonStats, polygonRange, polygonIdKey, pointData, showPolygons, showDots, showHeatmap, mapLoaded, onUpdateStateChange]);
+
+    // Live listeners are attached lazily (only when the live layers exist).
+    // Note: handlers must be defined in this scope (not inside the PPD listeners block),
+    // otherwise toggling Live can throw and blank the map.
+    const ensurePopups = () => {
+      if (!hoverPopupRef.current) {
+        hoverPopupRef.current = new mapboxgl.Popup({ closeButton: false, closeOnClick: false, offset: 12 });
+      }
+      if (!clickPopupRef.current) {
+        clickPopupRef.current = new mapboxgl.Popup({ closeButton: true, closeOnClick: true, offset: 12 });
+      }
+    };
+
+    const handleLiveHover = (event) => {
+      const feature = event.features?.[0];
+      if (!feature) return;
+      if (clickPopupRef.current?.isOpen()) return;
+      ensurePopups();
+      const props = feature.properties || {};
+      const kind = props.kind || 'sale';
+      const price = Number(props.price);
+      const title = `${props.district || 'London'} • ${kind === 'rent' ? 'Rent' : 'Sale'}`;
+      const subtitle = props.address ? String(props.address) : '';
+      const extra = props.approximate ? 'Approximate location' : '';
+      hoverPopupRef.current
+        .setLngLat(event.lngLat)
+        .setHTML(
+          `
+            <div class="popup-title">${escapeHtml(title)}</div>
+            ${subtitle ? `<div class="popup-sub">${escapeHtml(subtitle)}</div>` : ''}
+            <div class="popup-metrics">
+              <div>Price: ${formatPrice(price)}</div>
+              ${props.bedrooms ? `<div>Bedrooms: ${escapeHtml(props.bedrooms)}</div>` : ''}
+              ${extra ? `<div class="popup-note">${escapeHtml(extra)}</div>` : ''}
+            </div>
+          `
+        )
+        .addTo(mapInstance);
+    };
+
+    const handleLiveClusterClick = (event) => {
+      const feature = event.features?.[0];
+      if (!feature) return;
+      const clusterId = feature.properties?.cluster_id;
+      const source = mapInstance.getSource(liveSourceId);
+      if (!source || clusterId === undefined) return;
+      source.getClusterExpansionZoom(clusterId, (err, zoom) => {
+        if (err) return;
+        mapInstance.easeTo({ center: feature.geometry.coordinates, zoom, duration: 900 });
+      });
+    };
+
+    const handleLiveClick = async (event) => {
+      const feature = event.features?.[0];
+      if (!feature) return;
+      ensurePopups();
+      const props = feature.properties || {};
+      const id = feature.id || props.id;
+      const kind = props.kind || 'sale';
+      const price = Number(props.price);
+      const title = `${props.district || 'London'} • ${kind === 'rent' ? 'Rent' : 'Sale'}`;
+
+      const seq = ++clickSeqRef.current;
+      clickPopupRef.current
+        .setLngLat(event.lngLat)
+        .setHTML(
+          `
+            <div class="popup-title">${escapeHtml(title)}</div>
+            ${props.address ? `<div class="popup-sub">${escapeHtml(props.address)}</div>` : ''}
+            <div class="popup-metrics">
+              <div>Price: ${formatPrice(price)}</div>
+              ${props.bedrooms ? `<div>Bedrooms: ${escapeHtml(props.bedrooms)}</div>` : ''}
+              ${props.approximate ? `<div class="popup-note">Approximate location</div>` : ''}
+            </div>
+            <div class="popup-loading">Loading listing details…</div>
+          `
+        )
+        .addTo(mapInstance);
+
+      let details = null;
+      if (id) {
+        try {
+          const res = await fetchLiveListing({ id: String(id) });
+          details = res?.listing || null;
+        } catch {
+          details = null;
+        }
+      }
+      if (seq !== clickSeqRef.current) return;
+
+      const url = props.url || details?.listing_url || '';
+      const district = String(props.district || details?.area_code_district || '').toUpperCase();
+      const askBtn = id
+        ? `<button class="popup-cta" data-ask-live="1" data-id="${escapeHtml(String(id))}">Ask AI about this listing</button>`
+        : '';
+
+      const body = details
+        ? `
+          <div class="popup-section">
+            <div class="popup-note">Listing details</div>
+            <div class="popup-list">
+              <div class="popup-row">
+                <div class="popup-meta">${escapeHtml(details.street_address || '')}</div>
+                <div class="popup-address">${escapeHtml(details.area_code_district || district || '')}</div>
+              </div>
+              <div class="popup-row">
+                <div class="popup-meta">Bathrooms: ${escapeHtml(details.bathrooms ?? '—')}</div>
+                <div class="popup-meta">Living rooms: ${escapeHtml(details.living_rooms ?? '—')}</div>
+              </div>
+              <div class="popup-row">
+                <div class="popup-meta">Size: ${escapeHtml(details.property_size ?? '—')} ${escapeHtml(details.property_size_metric ?? '')}</div>
+              </div>
+            </div>
+          </div>
+        `
+        : `<div class="popup-empty">No extra details available.</div>`;
+
+      clickPopupRef.current.setHTML(
+        `
+          <div class="popup-title">${escapeHtml(title)}</div>
+          ${props.address ? `<div class="popup-sub">${escapeHtml(props.address)}</div>` : ''}
+          <div class="popup-metrics">
+            <div>Price: ${formatPrice(price)}</div>
+            ${props.bedrooms ? `<div>Bedrooms: ${escapeHtml(props.bedrooms)}</div>` : ''}
+          </div>
+          ${url ? `<div class="popup-note"><a href="${escapeHtml(url)}" target="_blank" rel="noreferrer">Open listing</a></div>` : ''}
+          ${askBtn}
+          ${body}
+        `
+      );
+
+      // 1) Wire the CTA to the AgentPanel (defensive: wait a tick for Mapbox to mount HTML).
+      requestAnimationFrame(() => {
+        const el = clickPopupRef.current?.getElement();
+        const btn = el?.querySelector('button[data-ask-live="1"]');
+        if (!btn) return;
+        btn.addEventListener(
+          'click',
+          async () => {
+            if (!agentRequestRef.current) return;
+            let live = null;
+            try {
+              live = district
+                ? await fetchLiveListings({ mode: 'district', code: district, kind: 'all', limit: 12 })
+                : null;
+            } catch {
+              live = null;
+            }
+            agentRequestRef.current({
+              selectionType: 'live',
+              title: district || 'Listing',
+              kind,
+              code: district || '',
+              listingId: String(id || ''),
+              listing: details,
+              price,
+              bedrooms: props.bedrooms,
+              context: {
+                selection: {
+                  type: 'live_listing',
+                  title: props.address || title,
+                  kind,
+                  code: district || '',
+                  price,
+                  bedrooms: props.bedrooms,
+                  url
+                },
+                live
+              }
+            });
+          },
+          { once: true }
+        );
+      });
+
+      // 2) Auto-send a summary request on click (same behavior as polygons/dots).
+      if (agentRequestRef.current) {
+        let live = null;
+        try {
+          live = district
+            ? await fetchLiveListings({ mode: 'district', code: district, kind: 'all', limit: 12 })
+            : null;
+        } catch {
+          live = null;
+        }
+        if (seq === clickSeqRef.current) {
+          agentRequestRef.current({
+            selectionType: 'live',
+            title: district || 'Listing',
+            kind,
+            code: district || '',
+            listingId: String(id || ''),
+            listing: details,
+            price,
+            bedrooms: props.bedrooms,
+            context: {
+              selection: {
+                type: 'live_listing',
+                title: props.address || title,
+                kind,
+                code: district || '',
+                price,
+                bedrooms: props.bedrooms,
+                url
+              },
+              live
+            }
+          });
+        }
+      }
+    };
+
+    if (!liveListenersAttachedRef.current && liveData && mapInstance.getLayer(livePointLayerId)) {
+      const setCursor = () => {
+        mapInstance.getCanvas().style.cursor = 'pointer';
+      };
+      const resetCursor = () => {
+        mapInstance.getCanvas().style.cursor = '';
+      };
+
+      mapInstance.on('mousemove', livePointLayerId, handleLiveHover);
+      mapInstance.on('click', livePointLayerId, handleLiveClick);
+      if (mapInstance.getLayer(liveClusterLayerId)) {
+        mapInstance.on('click', liveClusterLayerId, handleLiveClusterClick);
+      }
+      mapInstance.on('mouseenter', livePointLayerId, setCursor);
+      mapInstance.on('mouseleave', livePointLayerId, resetCursor);
+      if (mapInstance.getLayer(liveClusterLayerId)) {
+        mapInstance.on('mouseenter', liveClusterLayerId, setCursor);
+        mapInstance.on('mouseleave', liveClusterLayerId, resetCursor);
+      }
+      mapInstance.on('mouseleave', livePointLayerId, () => hoverPopupRef.current?.remove());
+      liveListenersAttachedRef.current = true;
+    }
+  }, [polygonData, polygonStats, polygonRange, polygonIdKey, pointData, liveData, showPolygons, showDots, showHeatmap, showLive, mapLoaded, onUpdateStateChange]);
 
   return (
     <div
