@@ -7,11 +7,16 @@ export default defineConfig({
     port: 3000,
     open: true,
     proxy: {
+      // Local FastAPI backend (serves /api + /data)
       '/api': {
-        target: 'https://api.scansan.com',
+        target: 'http://localhost:8000',
         changeOrigin: true,
-        secure: true,
-        rewrite: (path) => path.replace(/^\/api/, '')
+        secure: false
+      },
+      '/data': {
+        target: 'http://localhost:8000',
+        changeOrigin: true,
+        secure: false
       }
     }
   },
