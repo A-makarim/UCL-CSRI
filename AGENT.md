@@ -331,9 +331,9 @@ npm
 **2. Environment Setup**
 Create `frontend/.env`:
 ```env
-VITE_MAPBOX_TOKEN=pk.eyJ1IjoiYWJkdWxh...
+VITE_MAPBOX_TOKEN=your_mapbox_token_here
 VITE_API_URL=http://localhost:3002
-PERPLEXITY_API_KEY=pplx-YhNymO6...
+VITE_DATA_BASE_URL=https://your-data-bucket.s3.region.amazonaws.com
 ```
 
 **3. Install Dependencies**
