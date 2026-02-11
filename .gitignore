@@ -36,3 +36,7 @@ PPD/
 subbb/
 vendor/
 codepo_gb.zip
+notneeded/**
+scripts/public-read-policy.json
+scripts/simple_upload.ps1
+scripts/test_s3_access.ps1

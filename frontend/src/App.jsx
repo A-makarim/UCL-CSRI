@@ -12,6 +12,14 @@ function App() {
   const END_YEAR = 2030;
   const TOTAL_MONTHS = (END_YEAR - START_YEAR + 1) * 12;
   const [loading, setLoading] = useState(false);
+
+  const DATA_BASE_URL = import.meta.env.VITE_DATA_BASE_URL || '';
+  const dataUrl = (path) => {
+    if (!DATA_BASE_URL) return path;
+    const base = DATA_BASE_URL.replace(/\/+$/, '');
+    const suffix = String(path || '').replace(/^\/+/, '');
+    return `${base}/${suffix}`;
+  };
   
   const [activeMonth, setActiveMonth] = useState(1); // continuous in [1..TOTAL_MONTHS]
   const [baseMonthInt, setBaseMonthInt] = useState(1);
@@ -110,7 +118,7 @@ function App() {
       try {
         setLoading(true);
 
-        const response = await fetch('/outputs/sales_2018_2030_monthly.json');
+        const response = await fetch(dataUrl('/outputs/sales_2018_2030_monthly.json'));
         const data = await response.json();
         
         console.log('📦 Loaded Multi-Year Sales:', data.meta.totalSamples.toLocaleString(), 'samples');
@@ -220,7 +228,7 @@ function App() {
   useEffect(() => {
     const loadLiveListings = async () => {
       try {
-        const response = await fetch('/outputs/london_listings_geocoded.json');
+        const response = await fetch(dataUrl('/outputs/london_listings_geocoded.json'));
         const data = await response.json();
         
         // Flatten all listings from all areas into a single array
@@ -399,7 +407,7 @@ function App() {
     const loadIndexes = async () => {
       try {
         const polygonConfig = polygonLevels[polygonLevel];
-        const areaIndexRes = await fetch(`/data/${polygonConfig.dir}/index.json`, {
+        const areaIndexRes = await fetch(dataUrl(`/data/${polygonConfig.dir}/index.json`), {
           cache: 'no-store',
           signal: controller.signal
         });
@@ -455,7 +463,7 @@ function App() {
         const polygonConfig = polygonLevels[polygonLevel];
         
         // Load current month
-        const currentRes = await fetch(`/data/${polygonConfig.dir}/${polygonConfig.prefix}_${currentMonthKey}.geojson`, {
+        const currentRes = await fetch(dataUrl(`/data/${polygonConfig.dir}/${polygonConfig.prefix}_${currentMonthKey}.geojson`), {
           cache: 'no-store',
           signal: controller.signal
         });
@@ -465,7 +473,7 @@ function App() {
         const currentJson = await parseJsonResponse(currentRes, `${polygonConfig.label.toLowerCase()} ${currentMonthKey}`);
         
         // Load next month
-        const nextRes = await fetch(`/data/${polygonConfig.dir}/${polygonConfig.prefix}_${nextPolygonKey}.geojson`, {
+        const nextRes = await fetch(dataUrl(`/data/${polygonConfig.dir}/${polygonConfig.prefix}_${nextPolygonKey}.geojson`), {
           cache: 'no-store',
           signal: controller.signal
         });
@@ -478,7 +486,7 @@ function App() {
         setPolygonNextGeoData(nextJson);
 
         if (currentMonthKey) {
-          const statsRes = await fetch(`/data/polygon_stats/${polygonLevel}/${currentMonthKey}.json`, {
+          const statsRes = await fetch(dataUrl(`/data/polygon_stats/${polygonLevel}/${currentMonthKey}.json`), {
             cache: 'no-store',
             signal: controller.signal
           });
