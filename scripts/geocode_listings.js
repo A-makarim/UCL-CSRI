@@ -12,7 +12,7 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 // Configuration
-const MAPBOX_TOKEN = 'pk.eyJ1IjoiYWJkdWxhemVlbW1ha2FyaW11Y2wiLCJhIjoiY21sMmE3dW00MGNpZTNlcWtuMmF1Zm1qdyJ9.Y78biyHJGDH1t2Wdfv1Nbw';
+const MAPBOX_TOKEN = process.env.MAPBOX_TOKEN;
 const INPUT_FILE = path.join(__dirname, '../outputs/london_listings.json');
 const OUTPUT_FILE = path.join(__dirname, '../outputs/london_listings_geocoded.json');
 const RATE_LIMIT_DELAY = 200; // ms between requests (5 per second)
@@ -22,6 +22,10 @@ const MAX_PROPERTIES = 1000; // Set to number to limit for testing, null for all
 // Load existing data
 console.log('Loading london_listings.json...');
 const data = JSON.parse(fs.readFileSync(INPUT_FILE, 'utf8'));
+
+if (!MAPBOX_TOKEN) {
+  throw new Error('MAPBOX_TOKEN is required. Set it in your shell before running this script.');
+}
 
 // Geocoding function using Mapbox API
 async function geocodeAddress(address, districtCode) {
