@@ -60,7 +60,7 @@ Open: `http://localhost:8000`
 
 ## Data Inputs (3 datasets)
 
-1) **PPD (historical transactions)** — `PPD/YYYY.csv` (Land Registry Price Paid Data)
+1) **PPD GOV.UK (historical transactions)** — `PPD/YYYY.csv` (Land Registry Price Paid Data)
 2) **Code‑Point Open (postcode coordinates)** — `codepo_gb/Data/CSV/*.csv` (postcode → lat/lon centroids)
 3) **GB Postcodes boundaries (polygons)** — `gb-postcodes-v5/` (GeoJSON boundaries)
 
